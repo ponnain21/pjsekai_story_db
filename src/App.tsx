@@ -4,36 +4,19 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import './App.css'
 
-type NodeType = 'game' | 'arc' | 'session'
-type EntryKind = 'utterance' | 'stage' | 'note'
-
-const entryKindLabel: Record<EntryKind, string> = {
-  utterance: 'セリフ',
-  stage: 'ト書き',
-  note: 'メモ',
-}
-
-type NodeRow = {
+type ItemRow = {
   id: string
-  type: NodeType
   title: string
-  parent_id: string | null
   created_at: string
 }
 
-type ThreadRow = {
+type SubItemRow = {
   id: string
   node_id: string
   title: string
-  created_at: string
-}
-
-type EntryRow = {
-  id: string
-  thread_id: string
-  kind: EntryKind
-  speaker_name: string | null
-  content: string
+  scheduled_on: string | null
+  tags: string[] | null
+  body: string
   created_at: string
 }
 
@@ -43,33 +26,33 @@ function App() {
     'unknown',
   )
   const [authLoading, setAuthLoading] = useState(false)
-
-  const [nodes, setNodes] = useState<NodeRow[]>([])
-  const [threads, setThreads] = useState<ThreadRow[]>([])
-  const [entries, setEntries] = useState<EntryRow[]>([])
-
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
-
-  const [threadTitle, setThreadTitle] = useState('')
-  const [entryKind, setEntryKind] = useState<EntryKind>('utterance')
-  const [speakerName, setSpeakerName] = useState('')
-  const [entryContent, setEntryContent] = useState('')
-
   const [error, setError] = useState('')
-  const singleNode = nodes[0] ?? null
-  const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? null
+
+  const [items, setItems] = useState<ItemRow[]>([])
+  const [subItems, setSubItems] = useState<SubItemRow[]>([])
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+
+  const [itemTitle, setItemTitle] = useState('')
+  const [subItemTitle, setSubItemTitle] = useState('')
+  const [subItemDate, setSubItemDate] = useState('')
+  const [subItemTagsInput, setSubItemTagsInput] = useState('')
+  const [subItemBody, setSubItemBody] = useState('')
+
+  const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
 
   useEffect(() => {
     const loadSession = async () => {
       const { data } = await supabase.auth.getSession()
       setSession(data.session)
     }
-    loadSession()
+    void loadSession()
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, currentSession) => {
       setSession(currentSession)
     })
+
     return () => subscription.unsubscribe()
   }, [])
 
@@ -78,6 +61,7 @@ function App() {
       setAccessStatus('unknown')
       return
     }
+
     const email = session.user.email?.trim().toLowerCase()
     if (!email) {
       setError('Googleアカウントのメールアドレスが取得できませんでした。')
@@ -85,6 +69,7 @@ function App() {
       void supabase.auth.signOut()
       return
     }
+
     let active = true
     const verifyAccess = async () => {
       setError('')
@@ -94,122 +79,91 @@ function App() {
         .select('email')
         .eq('email', email)
         .maybeSingle()
+
       if (!active) return
+
       if (verifyError) {
         setError(verifyError.message)
         setAccessStatus('denied')
         await supabase.auth.signOut()
         return
       }
+
       if (!data) {
         setError('このGoogleアカウントは許可されていません。')
         setAccessStatus('denied')
         await supabase.auth.signOut()
         return
       }
+
       setAccessStatus('allowed')
     }
+
     void verifyAccess()
     return () => {
       active = false
     }
   }, [session])
 
-  const loadNodes = async () => {
+  const loadItems = async () => {
     const { data, error: loadError } = await supabase
       .from('nodes')
-      .select('id, type, title, parent_id, created_at')
+      .select('id, title, created_at')
+      .eq('parent_id', null)
       .order('created_at', { ascending: true })
+
     if (loadError) {
       setError(loadError.message)
       return
     }
-    let loadedNodes = (data ?? []) as NodeRow[]
-    if (loadedNodes.length === 0) {
-      const { error: createError } = await supabase.from('nodes').insert({
-        type: 'game' satisfies NodeType,
-        title: 'メイン',
-        parent_id: null,
-      })
-      if (createError) {
-        setError(createError.message)
-        return
-      }
-      const { data: refetchedNodes, error: refetchError } = await supabase
-        .from('nodes')
-        .select('id, type, title, parent_id, created_at')
-        .order('created_at', { ascending: true })
-      if (refetchError) {
-        setError(refetchError.message)
-        return
-      }
-      loadedNodes = (refetchedNodes ?? []) as NodeRow[]
-    }
-    setNodes(loadedNodes.slice(0, 1))
+
+    const loadedItems = (data ?? []) as ItemRow[]
+    setItems(loadedItems)
+    setSelectedItemId((current) => {
+      if (current && loadedItems.some((item) => item.id === current)) return current
+      return loadedItems[0]?.id ?? null
+    })
   }
 
-  const loadThreads = async (nodeId: string) => {
+  const loadSubItems = async (itemId: string) => {
     const { data, error: loadError } = await supabase
       .from('threads')
-      .select('id, node_id, title, created_at')
-      .eq('node_id', nodeId)
+      .select('id, node_id, title, scheduled_on, tags, body, created_at')
+      .eq('node_id', itemId)
       .order('created_at', { ascending: true })
-    if (loadError) {
-      setError(loadError.message)
-      return
-    }
-    setThreads((data ?? []) as ThreadRow[])
-  }
 
-  const loadEntries = async (threadId: string) => {
-    const { data, error: loadError } = await supabase
-      .from('entries')
-      .select('id, thread_id, kind, speaker_name, content, created_at')
-      .eq('thread_id', threadId)
-      .order('created_at', { ascending: true })
     if (loadError) {
       setError(loadError.message)
       return
     }
-    setEntries((data ?? []) as EntryRow[])
+
+    setSubItems((data ?? []) as SubItemRow[])
   }
 
   useEffect(() => {
     if (!session || accessStatus !== 'allowed') {
-      setNodes([])
-      setThreads([])
-      setEntries([])
-      setSelectedThreadId(null)
+      setItems([])
+      setSubItems([])
+      setSelectedItemId(null)
       return
     }
-    loadNodes()
+    void loadItems()
   }, [session, accessStatus])
 
   useEffect(() => {
-    if (!singleNode) {
-      setThreads([])
-      setSelectedThreadId(null)
+    if (!selectedItemId) {
+      setSubItems([])
       return
     }
-    loadThreads(singleNode.id)
-  }, [singleNode?.id])
-
-  useEffect(() => {
-    if (!selectedThreadId) {
-      setEntries([])
-      return
-    }
-    loadEntries(selectedThreadId)
-  }, [selectedThreadId])
+    void loadSubItems(selectedItemId)
+  }, [selectedItemId])
 
   const loginWithGoogle = async () => {
     setError('')
     setAuthLoading(true)
     const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
+      options: { redirectTo: window.location.origin },
     })
     if (signInError) {
       setError(signInError.message)
@@ -223,57 +177,70 @@ function App() {
     if (signOutError) setError(signOutError.message)
   }
 
-  const submitThread = async (event: FormEvent) => {
+  const submitItem = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
-    if (!singleNode) {
-      setError('固定ノードが見つかりません。再読み込みしてください。')
+
+    if (!itemTitle.trim()) {
+      setError('項目名は必須です。')
       return
     }
-    if (!threadTitle.trim()) {
-      setError('スレッド名は必須です。')
-      return
-    }
-    const { error: insertError } = await supabase.from('threads').insert({
-      node_id: singleNode.id,
-      title: threadTitle.trim(),
+
+    const { error: insertError } = await supabase.from('nodes').insert({
+      type: 'game',
+      title: itemTitle.trim(),
+      parent_id: null,
     })
+
     if (insertError) {
       setError(insertError.message)
       return
     }
-    setThreadTitle('')
-    await loadThreads(singleNode.id)
+
+    setItemTitle('')
+    await loadItems()
   }
 
-  const submitEntry = async (event: FormEvent) => {
+  const submitSubItem = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
-    if (!selectedThreadId) {
-      setError('先にスレッドを選択してください。')
+
+    if (!selectedItemId) {
+      setError('先に親項目を選択してください。')
       return
     }
-    if (!entryContent.trim()) {
-      setError('エントリー内容は必須です。')
+    if (!subItemTitle.trim()) {
+      setError('項目内項目名は必須です。')
       return
     }
-    if (entryKind === 'utterance' && !speakerName.trim()) {
-      setError('セリフの場合は話者名が必須です。')
+    if (!subItemBody.trim()) {
+      setError('本文は必須です。')
       return
     }
-    const { error: insertError } = await supabase.from('entries').insert({
-      thread_id: selectedThreadId,
-      kind: entryKind,
-      speaker_name: entryKind === 'utterance' ? speakerName.trim() : null,
-      content: entryContent.trim(),
+
+    const tags = subItemTagsInput
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0)
+
+    const { error: insertError } = await supabase.from('threads').insert({
+      node_id: selectedItemId,
+      title: subItemTitle.trim(),
+      scheduled_on: subItemDate || null,
+      tags,
+      body: subItemBody.trim(),
     })
+
     if (insertError) {
       setError(insertError.message)
       return
     }
-    setEntryContent('')
-    if (entryKind === 'utterance') setSpeakerName('')
-    await loadEntries(selectedThreadId)
+
+    setSubItemTitle('')
+    setSubItemDate('')
+    setSubItemTagsInput('')
+    setSubItemBody('')
+    await loadSubItems(selectedItemId)
   }
 
   if (!session) {
@@ -317,7 +284,7 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <h1>プロセカ ストーリーDB</h1>
+          <h1>ストーリー項目エディタ</h1>
           <p>{session.user.email}</p>
         </div>
         <button onClick={logout}>ログアウト</button>
@@ -327,105 +294,115 @@ function App() {
 
       <section className="workspace">
         <aside className="panel sidebar">
-          <h2>メニュー</h2>
-          <p className="subtle">{singleNode ? `ノード: ${singleNode.title}` : 'ノード準備中'}</p>
+          <h2>項目</h2>
+          <form className="stack-form" onSubmit={submitItem}>
+            <label>
+              新しい項目名
+              <input
+                value={itemTitle}
+                onChange={(event) => setItemTitle(event.target.value)}
+                placeholder="例: A"
+                required
+              />
+            </label>
+            <button type="submit">項目追加</button>
+          </form>
 
-          <div className="list thread-menu">
-            {threads.length === 0 ? (
-              <p className="subtle">スレッドがありません</p>
+          <div className="list item-list">
+            {items.length === 0 ? (
+              <p className="subtle">まだ項目がありません</p>
             ) : (
-              threads.map((thread) => (
+              items.map((item) => (
                 <button
-                  key={thread.id}
-                  className={`list-item menu-item ${selectedThreadId === thread.id ? 'active' : ''}`}
-                  onClick={() => setSelectedThreadId(thread.id)}
+                  key={item.id}
+                  className={`list-item ${selectedItemId === item.id ? 'active' : ''}`}
+                  onClick={() => setSelectedItemId(item.id)}
                 >
-                  {thread.title}
+                  {item.title}
                 </button>
               ))
             )}
           </div>
-
-          <form className="stack-form sidebar-form" onSubmit={submitThread}>
-            <h3>新規スレッド</h3>
-            <label>
-              タイトル
-              <input
-                value={threadTitle}
-                onChange={(event) => setThreadTitle(event.target.value)}
-                required
-              />
-            </label>
-            <button type="submit" disabled={!singleNode}>
-              作成
-            </button>
-          </form>
         </aside>
 
-        <section className="panel content-area">
-          <div className="content-header">
-            <h2>{selectedThread ? selectedThread.title : 'スレッドを選択してください'}</h2>
+        <section className="panel content-panel">
+          <div className="content-head">
+            <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
             <p className="subtle">
-              {selectedThread
-                ? '左メニューから切り替えて内容を確認できます'
-                : '左メニューからスレッドを選ぶと内容が表示されます'}
+              {selectedItem
+                ? 'この項目に「項目内項目」「日付」「タグ」「本文」を追加できます。'
+                : '左の一覧から項目を選ぶか、新しく作成してください。'}
             </p>
           </div>
 
-          <div className="entry-list data-view">
-            {selectedThreadId ? (
-              entries.map((entry) =>
-                entry.kind === 'utterance' ? (
-                  <article className="entry utterance" key={entry.id}>
-                    <p className="speaker">{entry.speaker_name || '不明'}</p>
-                    <p>{entry.content}</p>
+          <div className="subitem-list">
+            {selectedItemId ? (
+              subItems.length === 0 ? (
+                <p className="subtle">まだ項目内項目がありません</p>
+              ) : (
+                subItems.map((subItem) => (
+                  <article key={subItem.id} className="subitem-card">
+                    <header className="subitem-header">
+                      <h3>{subItem.title}</h3>
+                      <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
+                    </header>
+                    {subItem.tags && subItem.tags.length > 0 && (
+                      <div className="tag-list">
+                        {subItem.tags.map((tag) => (
+                          <span key={`${subItem.id}-${tag}`} className="tag-chip">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="subitem-body">{subItem.body}</p>
                   </article>
-                ) : (
-                  <article className={`entry divider ${entry.kind}`} key={entry.id}>
-                    <p>{entryKindLabel[entry.kind]}</p>
-                    <p>{entry.content}</p>
-                  </article>
-                ),
+                ))
               )
             ) : (
-              <p className="subtle">表示するデータがありません</p>
+              <p className="subtle">項目を選択するとここにデータが表示されます</p>
             )}
           </div>
 
-          <form className="stack-form entry-form" onSubmit={submitEntry}>
-            <h3>エントリー追加</h3>
+          <form className="stack-form subitem-form" onSubmit={submitSubItem}>
+            <h3>項目内項目を追加</h3>
             <label>
-              種別
-              <select
-                value={entryKind}
-                onChange={(event) => setEntryKind(event.target.value as EntryKind)}
-              >
-                <option value="utterance">{entryKindLabel.utterance}</option>
-                <option value="stage">{entryKindLabel.stage}</option>
-                <option value="note">{entryKindLabel.note}</option>
-              </select>
-            </label>
-            {entryKind === 'utterance' && (
-              <label>
-                話者名
-                <input
-                  value={speakerName}
-                  onChange={(event) => setSpeakerName(event.target.value)}
-                  required
-                />
-              </label>
-            )}
-            <label>
-              内容
-              <textarea
-                rows={4}
-                value={entryContent}
-                onChange={(event) => setEntryContent(event.target.value)}
+              項目内項目
+              <input
+                value={subItemTitle}
+                onChange={(event) => setSubItemTitle(event.target.value)}
+                placeholder="例: 導入シーン"
                 required
               />
             </label>
-            <button type="submit" disabled={!selectedThreadId}>
-              追加
+            <label>
+              日付
+              <input
+                type="date"
+                value={subItemDate}
+                onChange={(event) => setSubItemDate(event.target.value)}
+              />
+            </label>
+            <label>
+              項目タグ付け（カンマ区切り）
+              <input
+                value={subItemTagsInput}
+                onChange={(event) => setSubItemTagsInput(event.target.value)}
+                placeholder="例: 重要, イベント, 修正待ち"
+              />
+            </label>
+            <label>
+              本文
+              <textarea
+                rows={6}
+                value={subItemBody}
+                onChange={(event) => setSubItemBody(event.target.value)}
+                placeholder="項目内項目の本文を入力"
+                required
+              />
+            </label>
+            <button type="submit" disabled={!selectedItemId}>
+              項目内項目を追加
             </button>
           </form>
         </section>

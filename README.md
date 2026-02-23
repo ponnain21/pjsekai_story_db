@@ -35,6 +35,7 @@ on conflict (email) do nothing;
 ```
 
 ※ 未登録メールはログイン後すぐに弾かれ、データアクセスも RLS で拒否されます。
+※ 既存プロジェクトを更新する場合も `supabase/schema.sql` を再実行してください（`threads` に日付/タグ/本文カラムを追加します）。
 
 ## 3. アプリ起動
 
@@ -43,7 +44,7 @@ npm run dev
 ```
 
 ブラウザで `http://localhost:5174` を開きます。  
-Google ログイン後に `Node -> Thread -> Entry` の順で登録できます。
+Google ログイン後に `項目 -> 項目内項目（本文/日付/タグ）` の順で登録できます。
 
 WSL で監視が不安定な場合:
 

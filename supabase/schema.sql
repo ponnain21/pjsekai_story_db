@@ -20,8 +20,18 @@ create table if not exists public.threads (
   id uuid primary key default gen_random_uuid(),
   node_id uuid not null references public.nodes (id) on delete cascade,
   title text not null,
+  scheduled_on date null,
+  tags text[] not null default '{}',
+  body text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.threads
+  add column if not exists scheduled_on date null;
+alter table if exists public.threads
+  add column if not exists tags text[] not null default '{}';
+alter table if exists public.threads
+  add column if not exists body text not null default '';
 
 create table if not exists public.entries (
   id uuid primary key default gen_random_uuid(),
