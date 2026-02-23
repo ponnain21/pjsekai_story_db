@@ -225,6 +225,11 @@ button {
   color: #304455;
 }
 
+.logout-mini {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.5rem;
+}
+
 .danger-button {
   border-color: #bb2d3b;
   background: #bb2d3b;

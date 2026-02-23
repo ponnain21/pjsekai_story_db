@@ -338,11 +338,10 @@ function App() {
         <aside className="panel sidebar">
           <div className="sidebar-head">
             <h2>項目</h2>
-            <button type="button" className="ghost-button" onClick={logout}>
+            <button type="button" className="ghost-button logout-mini" onClick={logout}>
               ログアウト
             </button>
           </div>
-          <p className="subtle">{session.user.email}</p>
           <form className="stack-form" onSubmit={submitItem}>
             <label>
               新しい項目名
