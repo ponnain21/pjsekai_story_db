@@ -182,6 +182,12 @@
   font-size: 0.9rem;
 }
 
+.item-action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
 .subtle {
   color: #5a6a77;
   margin: 0;
@@ -221,6 +227,11 @@ button {
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
   cursor: pointer;
+}
+
+.danger-button {
+  border-color: #bb2d3b;
+  background: #bb2d3b;
 }
 
 button:disabled {

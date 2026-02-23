@@ -38,6 +38,37 @@ with check (
   )
 );
 
+drop policy if exists "nodes_update_allowlisted" on public.nodes;
+create policy "nodes_update_allowlisted"
+on public.nodes for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "nodes_delete_allowlisted" on public.nodes;
+create policy "nodes_delete_allowlisted"
+on public.nodes for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
 drop policy if exists "threads_select_authenticated" on public.threads;
 drop policy if exists "threads_insert_authenticated" on public.threads;
 drop policy if exists "threads_select_allowlisted" on public.threads;
@@ -64,6 +95,37 @@ with check (
   )
 );
 
+drop policy if exists "threads_update_allowlisted" on public.threads;
+create policy "threads_update_allowlisted"
+on public.threads for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "threads_delete_allowlisted" on public.threads;
+create policy "threads_delete_allowlisted"
+on public.threads for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
 drop policy if exists "entries_select_authenticated" on public.entries;
 drop policy if exists "entries_insert_authenticated" on public.entries;
 drop policy if exists "entries_select_allowlisted" on public.entries;
@@ -83,6 +145,37 @@ create policy "entries_insert_allowlisted"
 on public.entries for insert
 to authenticated
 with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "entries_update_allowlisted" on public.entries;
+create policy "entries_update_allowlisted"
+on public.entries for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "entries_delete_allowlisted" on public.entries;
+create policy "entries_delete_allowlisted"
+on public.entries for delete
+to authenticated
+using (
   exists (
     select 1
     from public.allowed_users au

@@ -33,12 +33,17 @@ function App() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
+  const [renameItemTitle, setRenameItemTitle] = useState('')
   const [subItemTitle, setSubItemTitle] = useState('')
   const [subItemDate, setSubItemDate] = useState('')
   const [subItemTagsInput, setSubItemTagsInput] = useState('')
   const [subItemBody, setSubItemBody] = useState('')
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
+
+  useEffect(() => {
+    setRenameItemTitle(selectedItem?.title ?? '')
+  }, [selectedItem?.id, selectedItem?.title])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -201,6 +206,51 @@ function App() {
     await loadItems()
   }
 
+  const submitRenameItem = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+
+    if (!selectedItemId) {
+      setError('先に名前変更したい項目を選択してください。')
+      return
+    }
+    if (!renameItemTitle.trim()) {
+      setError('変更後の項目名は必須です。')
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('nodes')
+      .update({ title: renameItemTitle.trim() })
+      .eq('id', selectedItemId)
+
+    if (updateError) {
+      setError(updateError.message)
+      return
+    }
+
+    await loadItems()
+  }
+
+  const deleteSelectedItem = async () => {
+    setError('')
+    if (!selectedItem) {
+      setError('先に削除したい項目を選択してください。')
+      return
+    }
+
+    const confirmed = window.confirm(`「${selectedItem.title}」を削除しますか？`)
+    if (!confirmed) return
+
+    const { error: deleteError } = await supabase.from('nodes').delete().eq('id', selectedItem.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    await loadItems()
+  }
+
   const submitSubItem = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -323,6 +373,32 @@ function App() {
               ))
             )}
           </div>
+
+          <form className="stack-form" onSubmit={submitRenameItem}>
+            <label>
+              選択中項目の名前変更
+              <input
+                value={renameItemTitle}
+                onChange={(event) => setRenameItemTitle(event.target.value)}
+                placeholder="変更後の項目名"
+                disabled={!selectedItemId}
+                required
+              />
+            </label>
+            <div className="item-action-row">
+              <button type="submit" disabled={!selectedItemId}>
+                名前変更
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                onClick={deleteSelectedItem}
+                disabled={!selectedItemId}
+              >
+                項目削除
+              </button>
+            </div>
+          </form>
         </aside>
 
         <section className="panel content-panel">
