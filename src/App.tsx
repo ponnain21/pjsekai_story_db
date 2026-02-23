@@ -365,17 +365,20 @@ function App() {
               </button>
             </section>
           )}
-          <form className="stack-form" onSubmit={submitItem}>
-            <label>
+          <form className="stack-form item-create-form" onSubmit={submitItem}>
+            <label className="sr-only" htmlFor="new-item-title">
               新しい項目名
+            </label>
+            <div className="item-create-row">
               <input
+                id="new-item-title"
                 value={itemTitle}
                 onChange={(event) => setItemTitle(event.target.value)}
-                placeholder="例: A"
+                placeholder="新しい項目名"
                 required
               />
-            </label>
-            <button type="submit">項目追加</button>
+              <button type="submit">項目追加</button>
+            </div>
           </form>
 
           <div className="list item-list">
@@ -385,7 +388,7 @@ function App() {
               items.map((item) => (
                 <button
                   key={item.id}
-                  className={`list-item ${selectedItemId === item.id ? 'active' : ''}`}
+                  className={`list-item item-list-item ${selectedItemId === item.id ? 'active' : ''}`}
                   onClick={() => setSelectedItemId(item.id)}
                 >
                   {item.title}
