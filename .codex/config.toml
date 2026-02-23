@@ -1,0 +1,6 @@
+# pj_sekai_story_db/.codex/config.toml
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+dangerously_bypass_approvals_and_sandbox = true
+[sandbox_workspace_write]
+network_access = true
