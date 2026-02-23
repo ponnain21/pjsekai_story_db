@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -6,12 +6,6 @@ import './App.css'
 
 type NodeType = 'game' | 'arc' | 'session'
 type EntryKind = 'utterance' | 'stage' | 'note'
-
-const nodeTypeLabel: Record<NodeType, string> = {
-  game: 'ゲーム',
-  arc: 'アーク',
-  session: 'セッション',
-}
 
 const entryKindLabel: Record<EntryKind, string> = {
   utterance: 'セリフ',
@@ -54,22 +48,15 @@ function App() {
   const [threads, setThreads] = useState<ThreadRow[]>([])
   const [entries, setEntries] = useState<EntryRow[]>([])
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
 
-  const [nodeType, setNodeType] = useState<NodeType>('game')
-  const [nodeTitle, setNodeTitle] = useState('')
   const [threadTitle, setThreadTitle] = useState('')
   const [entryKind, setEntryKind] = useState<EntryKind>('utterance')
   const [speakerName, setSpeakerName] = useState('')
   const [entryContent, setEntryContent] = useState('')
 
   const [error, setError] = useState('')
-
-  const selectedNode = useMemo(
-    () => nodes.find((node) => node.id === selectedNodeId) ?? null,
-    [nodes, selectedNodeId],
-  )
+  const singleNode = nodes[0] ?? null
 
   useEffect(() => {
     const loadSession = async () => {
@@ -136,7 +123,28 @@ function App() {
       setError(loadError.message)
       return
     }
-    setNodes((data ?? []) as NodeRow[])
+    let loadedNodes = (data ?? []) as NodeRow[]
+    if (loadedNodes.length === 0) {
+      const { error: createError } = await supabase.from('nodes').insert({
+        type: 'game' satisfies NodeType,
+        title: 'メイン',
+        parent_id: null,
+      })
+      if (createError) {
+        setError(createError.message)
+        return
+      }
+      const { data: refetchedNodes, error: refetchError } = await supabase
+        .from('nodes')
+        .select('id, type, title, parent_id, created_at')
+        .order('created_at', { ascending: true })
+      if (refetchError) {
+        setError(refetchError.message)
+        return
+      }
+      loadedNodes = (refetchedNodes ?? []) as NodeRow[]
+    }
+    setNodes(loadedNodes.slice(0, 1))
   }
 
   const loadThreads = async (nodeId: string) => {
@@ -170,7 +178,6 @@ function App() {
       setNodes([])
       setThreads([])
       setEntries([])
-      setSelectedNodeId(null)
       setSelectedThreadId(null)
       return
     }
@@ -178,13 +185,13 @@ function App() {
   }, [session, accessStatus])
 
   useEffect(() => {
-    if (!selectedNodeId) {
+    if (!singleNode) {
       setThreads([])
       setSelectedThreadId(null)
       return
     }
-    loadThreads(selectedNodeId)
-  }, [selectedNodeId])
+    loadThreads(singleNode.id)
+  }, [singleNode?.id])
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -215,35 +222,11 @@ function App() {
     if (signOutError) setError(signOutError.message)
   }
 
-  const submitNode = async (event: FormEvent) => {
-    event.preventDefault()
-    setError('')
-    if (!nodeTitle.trim()) {
-      setError('ノード名は必須です。')
-      return
-    }
-    if ((nodeType === 'arc' || nodeType === 'session') && !selectedNodeId) {
-      setError('アーク/セッションを作る前に親ノードを選択してください。')
-      return
-    }
-    const { error: insertError } = await supabase.from('nodes').insert({
-      type: nodeType,
-      title: nodeTitle.trim(),
-      parent_id: nodeType === 'game' ? null : selectedNodeId,
-    })
-    if (insertError) {
-      setError(insertError.message)
-      return
-    }
-    setNodeTitle('')
-    await loadNodes()
-  }
-
   const submitThread = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
-    if (!selectedNodeId) {
-      setError('先にノードを選択してください。')
+    if (!singleNode) {
+      setError('固定ノードが見つかりません。再読み込みしてください。')
       return
     }
     if (!threadTitle.trim()) {
@@ -251,7 +234,7 @@ function App() {
       return
     }
     const { error: insertError } = await supabase.from('threads').insert({
-      node_id: selectedNodeId,
+      node_id: singleNode.id,
       title: threadTitle.trim(),
     })
     if (insertError) {
@@ -259,7 +242,7 @@ function App() {
       return
     }
     setThreadTitle('')
-    await loadThreads(selectedNodeId)
+    await loadThreads(singleNode.id)
   }
 
   const submitEntry = async (event: FormEvent) => {
@@ -290,18 +273,6 @@ function App() {
     setEntryContent('')
     if (entryKind === 'utterance') setSpeakerName('')
     await loadEntries(selectedThreadId)
-  }
-
-  const getNodeDepth = (node: NodeRow) => {
-    let depth = 0
-    let currentParentId = node.parent_id
-    while (currentParentId) {
-      const parent = nodes.find((item) => item.id === currentParentId)
-      if (!parent) break
-      depth += 1
-      currentParentId = parent.parent_id
-    }
-    return depth
   }
 
   if (!session) {
@@ -354,52 +325,9 @@ function App() {
       {error && <p className="error global-error">{error}</p>}
 
       <section className="columns">
-        <aside className="panel">
-          <h2>ノード</h2>
-          <div className="list">
-            {nodes.map((node) => (
-              <button
-                key={node.id}
-                className={`list-item ${selectedNodeId === node.id ? 'active' : ''}`}
-                style={{ paddingLeft: `${0.75 + getNodeDepth(node) * 1}rem` }}
-                onClick={() => setSelectedNodeId(node.id)}
-              >
-                <span className="item-type">{nodeTypeLabel[node.type]}</span>
-                <span>{node.title}</span>
-              </button>
-            ))}
-          </div>
-
-          <form className="stack-form" onSubmit={submitNode}>
-            <h3>ノード追加</h3>
-            <label>
-              種別
-              <select
-                value={nodeType}
-                onChange={(event) => setNodeType(event.target.value as NodeType)}
-              >
-                <option value="game">{nodeTypeLabel.game}</option>
-                <option value="arc">{nodeTypeLabel.arc}</option>
-                <option value="session">{nodeTypeLabel.session}</option>
-              </select>
-            </label>
-            <label>
-              タイトル
-              <input
-                value={nodeTitle}
-                onChange={(event) => setNodeTitle(event.target.value)}
-                required
-              />
-            </label>
-            <button type="submit">追加</button>
-          </form>
-        </aside>
-
         <section className="panel">
           <h2>スレッド</h2>
-          <p className="subtle">
-            {selectedNode ? `ノード: ${selectedNode.title}` : 'ノードを選択してください'}
-          </p>
+          <p className="subtle">{singleNode ? `ノード: ${singleNode.title}` : 'ノード準備中'}</p>
           <div className="list">
             {threads.map((thread) => (
               <button
@@ -422,7 +350,7 @@ function App() {
                 required
               />
             </label>
-            <button type="submit" disabled={!selectedNodeId}>
+            <button type="submit" disabled={!singleNode}>
               追加
             </button>
           </form>

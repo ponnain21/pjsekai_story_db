@@ -44,7 +44,7 @@
 .columns {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 300px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 0.75rem;
   min-height: 0;
 }
