@@ -20,10 +20,21 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ## 2. Supabase 新規プロジェクト作成
 
 1. Supabase で新しい Project を作る
-2. `Authentication > Providers` で `Email` を有効化
-3. `SQL Editor` で `supabase/schema.sql` を実行
-4. 続けて `supabase/rls.sql` を実行
-5. `Authentication > Users` でログイン用ユーザーを作る
+2. `Authentication > Providers` で `Google` を有効化し、Google Cloud で作成した OAuth Client ID / Secret を設定
+3. `Authentication > URL Configuration` で `Site URL` と `Redirect URLs` にローカルURL（例: `http://localhost:5174`）を追加
+4. `SQL Editor` で `supabase/schema.sql` を実行
+5. 続けて `supabase/rls.sql` を実行
+6. `SQL Editor` で、ログインを許可する Google メールを `public.allowed_users` に登録（すべて小文字）
+
+```sql
+insert into public.allowed_users (email)
+values
+  ('alice@example.com'),
+  ('bob@example.com')
+on conflict (email) do nothing;
+```
+
+※ 未登録メールはログイン後すぐに弾かれ、データアクセスも RLS で拒否されます。
 
 ## 3. アプリ起動
 
@@ -32,7 +43,7 @@ npm run dev
 ```
 
 ブラウザで `http://localhost:5174` を開きます。  
-ログイン後に `Node -> Thread -> Entry` の順で登録できます。
+Google ログイン後に `Node -> Thread -> Entry` の順で登録できます。
 
 WSL で監視が不安定な場合:
 

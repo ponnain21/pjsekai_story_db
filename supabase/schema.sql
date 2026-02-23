@@ -3,6 +3,11 @@
 
 create extension if not exists pgcrypto;
 
+create table if not exists public.allowed_users (
+  email text primary key check (email = lower(email)),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.nodes (
   id uuid primary key default gen_random_uuid(),
   type text not null check (type in ('game', 'arc', 'session')),

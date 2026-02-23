@@ -33,8 +33,9 @@ type EntryRow = {
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [accessStatus, setAccessStatus] = useState<'unknown' | 'checking' | 'allowed' | 'denied'>(
+    'unknown',
+  )
   const [authLoading, setAuthLoading] = useState(false)
 
   const [nodes, setNodes] = useState<NodeRow[]>([])
@@ -71,6 +72,48 @@ function App() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (!session) {
+      setAccessStatus('unknown')
+      return
+    }
+    const email = session.user.email?.trim().toLowerCase()
+    if (!email) {
+      setError('Google account email is missing.')
+      setAccessStatus('denied')
+      void supabase.auth.signOut()
+      return
+    }
+    let active = true
+    const verifyAccess = async () => {
+      setError('')
+      setAccessStatus('checking')
+      const { data, error: verifyError } = await supabase
+        .from('allowed_users')
+        .select('email')
+        .eq('email', email)
+        .maybeSingle()
+      if (!active) return
+      if (verifyError) {
+        setError(verifyError.message)
+        setAccessStatus('denied')
+        await supabase.auth.signOut()
+        return
+      }
+      if (!data) {
+        setError('This Google account is not allowed.')
+        setAccessStatus('denied')
+        await supabase.auth.signOut()
+        return
+      }
+      setAccessStatus('allowed')
+    }
+    void verifyAccess()
+    return () => {
+      active = false
+    }
+  }, [session])
 
   const loadNodes = async () => {
     const { data, error: loadError } = await supabase
@@ -111,7 +154,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (!session) {
+    if (!session || accessStatus !== 'allowed') {
       setNodes([])
       setThreads([])
       setEntries([])
@@ -120,7 +163,7 @@ function App() {
       return
     }
     loadNodes()
-  }, [session])
+  }, [session, accessStatus])
 
   useEffect(() => {
     if (!selectedNodeId) {
@@ -139,20 +182,19 @@ function App() {
     loadEntries(selectedThreadId)
   }, [selectedThreadId])
 
-  const submitLogin = async (event: FormEvent) => {
-    event.preventDefault()
+  const loginWithGoogle = async () => {
     setError('')
     setAuthLoading(true)
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const { error: signInError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
     })
     if (signInError) {
       setError(signInError.message)
-    } else {
-      setPassword('')
+      setAuthLoading(false)
     }
-    setAuthLoading(false)
   }
 
   const logout = async () => {
@@ -253,33 +295,36 @@ function App() {
   if (!session) {
     return (
       <main className="auth-shell">
-        <form className="auth-card" onSubmit={submitLogin}>
+        <div className="auth-card">
           <h1>Story DB Login</h1>
-          <label>
-            Email
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          <button type="submit" disabled={authLoading}>
-            {authLoading ? 'Logging in...' : 'Login'}
+          <p className="subtle">Sign in with Google (allowlisted accounts only).</p>
+          <button type="button" onClick={loginWithGoogle} disabled={authLoading}>
+            {authLoading ? 'Redirecting...' : 'Continue with Google'}
           </button>
           {error && <p className="error">{error}</p>}
-        </form>
+        </div>
+      </main>
+    )
+  }
+
+  if (accessStatus === 'unknown' || accessStatus === 'checking') {
+    return (
+      <main className="auth-shell">
+        <div className="auth-card">
+          <h1>Story DB Login</h1>
+          <p className="subtle">Checking access permissions...</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (accessStatus === 'denied') {
+    return (
+      <main className="auth-shell">
+        <div className="auth-card">
+          <h1>Story DB Login</h1>
+          <p className="subtle">This account is not allowed. Signing out...</p>
+        </div>
       </main>
     )
   }
