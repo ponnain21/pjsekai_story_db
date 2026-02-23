@@ -7,6 +7,18 @@ import './App.css'
 type NodeType = 'game' | 'arc' | 'session'
 type EntryKind = 'utterance' | 'stage' | 'note'
 
+const nodeTypeLabel: Record<NodeType, string> = {
+  game: 'ゲーム',
+  arc: 'アーク',
+  session: 'セッション',
+}
+
+const entryKindLabel: Record<EntryKind, string> = {
+  utterance: 'セリフ',
+  stage: 'ト書き',
+  note: 'メモ',
+}
+
 type NodeRow = {
   id: string
   type: NodeType
@@ -80,7 +92,7 @@ function App() {
     }
     const email = session.user.email?.trim().toLowerCase()
     if (!email) {
-      setError('Google account email is missing.')
+      setError('Googleアカウントのメールアドレスが取得できませんでした。')
       setAccessStatus('denied')
       void supabase.auth.signOut()
       return
@@ -102,7 +114,7 @@ function App() {
         return
       }
       if (!data) {
-        setError('This Google account is not allowed.')
+        setError('このGoogleアカウントは許可されていません。')
         setAccessStatus('denied')
         await supabase.auth.signOut()
         return
@@ -207,11 +219,11 @@ function App() {
     event.preventDefault()
     setError('')
     if (!nodeTitle.trim()) {
-      setError('Node title is required.')
+      setError('ノード名は必須です。')
       return
     }
     if ((nodeType === 'arc' || nodeType === 'session') && !selectedNodeId) {
-      setError('Select a parent node before creating arc/session.')
+      setError('アーク/セッションを作る前に親ノードを選択してください。')
       return
     }
     const { error: insertError } = await supabase.from('nodes').insert({
@@ -231,11 +243,11 @@ function App() {
     event.preventDefault()
     setError('')
     if (!selectedNodeId) {
-      setError('Select a node first.')
+      setError('先にノードを選択してください。')
       return
     }
     if (!threadTitle.trim()) {
-      setError('Thread title is required.')
+      setError('スレッド名は必須です。')
       return
     }
     const { error: insertError } = await supabase.from('threads').insert({
@@ -254,15 +266,15 @@ function App() {
     event.preventDefault()
     setError('')
     if (!selectedThreadId) {
-      setError('Select a thread first.')
+      setError('先にスレッドを選択してください。')
       return
     }
     if (!entryContent.trim()) {
-      setError('Entry content is required.')
+      setError('エントリー内容は必須です。')
       return
     }
     if (entryKind === 'utterance' && !speakerName.trim()) {
-      setError('Speaker name is required for utterance.')
+      setError('セリフの場合は話者名が必須です。')
       return
     }
     const { error: insertError } = await supabase.from('entries').insert({
@@ -296,10 +308,10 @@ function App() {
     return (
       <main className="auth-shell">
         <div className="auth-card">
-          <h1>Story DB Login</h1>
-          <p className="subtle">Sign in with Google (allowlisted accounts only).</p>
+          <h1>ストーリーDB ログイン</h1>
+          <p className="subtle">Googleでログイン（許可済みアカウントのみ）</p>
           <button type="button" onClick={loginWithGoogle} disabled={authLoading}>
-            {authLoading ? 'Redirecting...' : 'Continue with Google'}
+            {authLoading ? 'リダイレクト中...' : 'Googleでログイン'}
           </button>
           {error && <p className="error">{error}</p>}
         </div>
@@ -311,8 +323,8 @@ function App() {
     return (
       <main className="auth-shell">
         <div className="auth-card">
-          <h1>Story DB Login</h1>
-          <p className="subtle">Checking access permissions...</p>
+          <h1>ストーリーDB ログイン</h1>
+          <p className="subtle">アクセス権を確認中...</p>
         </div>
       </main>
     )
@@ -322,8 +334,8 @@ function App() {
     return (
       <main className="auth-shell">
         <div className="auth-card">
-          <h1>Story DB Login</h1>
-          <p className="subtle">This account is not allowed. Signing out...</p>
+          <h1>ストーリーDB ログイン</h1>
+          <p className="subtle">このアカウントは許可されていません。サインアウトします...</p>
         </div>
       </main>
     )
@@ -333,17 +345,17 @@ function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <h1>Project Sekai Story DB</h1>
+          <h1>プロセカ ストーリーDB</h1>
           <p>{session.user.email}</p>
         </div>
-        <button onClick={logout}>Logout</button>
+        <button onClick={logout}>ログアウト</button>
       </header>
 
       {error && <p className="error global-error">{error}</p>}
 
       <section className="columns">
         <aside className="panel">
-          <h2>Nodes</h2>
+          <h2>ノード</h2>
           <div className="list">
             {nodes.map((node) => (
               <button
@@ -352,41 +364,41 @@ function App() {
                 style={{ paddingLeft: `${0.75 + getNodeDepth(node) * 1}rem` }}
                 onClick={() => setSelectedNodeId(node.id)}
               >
-                <span className="item-type">{node.type}</span>
+                <span className="item-type">{nodeTypeLabel[node.type]}</span>
                 <span>{node.title}</span>
               </button>
             ))}
           </div>
 
           <form className="stack-form" onSubmit={submitNode}>
-            <h3>Add Node</h3>
+            <h3>ノード追加</h3>
             <label>
-              Type
+              種別
               <select
                 value={nodeType}
                 onChange={(event) => setNodeType(event.target.value as NodeType)}
               >
-                <option value="game">game</option>
-                <option value="arc">arc</option>
-                <option value="session">session</option>
+                <option value="game">{nodeTypeLabel.game}</option>
+                <option value="arc">{nodeTypeLabel.arc}</option>
+                <option value="session">{nodeTypeLabel.session}</option>
               </select>
             </label>
             <label>
-              Title
+              タイトル
               <input
                 value={nodeTitle}
                 onChange={(event) => setNodeTitle(event.target.value)}
                 required
               />
             </label>
-            <button type="submit">Add Node</button>
+            <button type="submit">追加</button>
           </form>
         </aside>
 
         <section className="panel">
-          <h2>Threads</h2>
+          <h2>スレッド</h2>
           <p className="subtle">
-            {selectedNode ? `Node: ${selectedNode.title}` : 'Select a node'}
+            {selectedNode ? `ノード: ${selectedNode.title}` : 'ノードを選択してください'}
           </p>
           <div className="list">
             {threads.map((thread) => (
@@ -401,9 +413,9 @@ function App() {
           </div>
 
           <form className="stack-form" onSubmit={submitThread}>
-            <h3>Add Thread</h3>
+            <h3>スレッド追加</h3>
             <label>
-              Title
+              タイトル
               <input
                 value={threadTitle}
                 onChange={(event) => setThreadTitle(event.target.value)}
@@ -411,47 +423,47 @@ function App() {
               />
             </label>
             <button type="submit" disabled={!selectedNodeId}>
-              Add Thread
+              追加
             </button>
           </form>
         </section>
 
         <section className="panel entry-panel">
-          <h2>Entries</h2>
+          <h2>エントリー</h2>
           <p className="subtle">
-            {selectedThreadId ? 'Chat View' : 'Select a thread'}
+            {selectedThreadId ? 'チャット表示' : 'スレッドを選択してください'}
           </p>
           <div className="entry-list">
             {entries.map((entry) =>
               entry.kind === 'utterance' ? (
                 <article className="entry utterance" key={entry.id}>
-                  <p className="speaker">{entry.speaker_name || 'Unknown'}</p>
+                  <p className="speaker">{entry.speaker_name || '不明'}</p>
                   <p>{entry.content}</p>
                 </article>
               ) : (
                 <article className={`entry divider ${entry.kind}`} key={entry.id}>
-                  <p>{entry.kind.toUpperCase()}</p>
+                  <p>{entryKindLabel[entry.kind]}</p>
                   <p>{entry.content}</p>
                 </article>
               ),
             )}
           </div>
           <form className="stack-form entry-form" onSubmit={submitEntry}>
-            <h3>Add Entry</h3>
+            <h3>エントリー追加</h3>
             <label>
-              Kind
+              種別
               <select
                 value={entryKind}
                 onChange={(event) => setEntryKind(event.target.value as EntryKind)}
               >
-                <option value="utterance">utterance</option>
-                <option value="stage">stage</option>
-                <option value="note">note</option>
+                <option value="utterance">{entryKindLabel.utterance}</option>
+                <option value="stage">{entryKindLabel.stage}</option>
+                <option value="note">{entryKindLabel.note}</option>
               </select>
             </label>
             {entryKind === 'utterance' && (
               <label>
-                Speaker Name
+                話者名
                 <input
                   value={speakerName}
                   onChange={(event) => setSpeakerName(event.target.value)}
@@ -460,7 +472,7 @@ function App() {
               </label>
             )}
             <label>
-              Content
+              内容
               <textarea
                 rows={4}
                 value={entryContent}
@@ -469,7 +481,7 @@ function App() {
               />
             </label>
             <button type="submit" disabled={!selectedThreadId}>
-              Add Entry
+              追加
             </button>
           </form>
         </section>
