@@ -109,7 +109,7 @@ function App() {
     const { data, error: loadError } = await supabase
       .from('nodes')
       .select('id, title, created_at')
-      .eq('parent_id', null)
+      .is('parent_id', null)
       .order('created_at', { ascending: true })
 
     if (loadError) {
