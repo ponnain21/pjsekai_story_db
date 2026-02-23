@@ -27,6 +27,7 @@ function App() {
   )
   const [authLoading, setAuthLoading] = useState(false)
   const [error, setError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const [items, setItems] = useState<ItemRow[]>([])
   const [subItems, setSubItems] = useState<SubItemRow[]>([])
@@ -178,6 +179,7 @@ function App() {
 
   const logout = async () => {
     setError('')
+    setSettingsOpen(false)
     const { error: signOutError } = await supabase.auth.signOut()
     if (signOutError) setError(signOutError.message)
   }
@@ -338,10 +340,31 @@ function App() {
         <aside className="panel sidebar">
           <div className="sidebar-head">
             <h2>項目</h2>
-            <button type="button" className="ghost-button logout-mini" onClick={logout}>
-              ログアウト
+            <button
+              type="button"
+              className="ghost-button logout-mini"
+              onClick={() => setSettingsOpen((current) => !current)}
+            >
+              設定
             </button>
           </div>
+          {settingsOpen && (
+            <section className="settings-box">
+              <div className="settings-head">
+                <p className="subtle">設定メニュー</p>
+                <button
+                  type="button"
+                  className="ghost-button close-mini"
+                  onClick={() => setSettingsOpen(false)}
+                >
+                  閉じる
+                </button>
+              </div>
+              <button type="button" className="danger-button settings-logout" onClick={logout}>
+                ログアウト
+              </button>
+            </section>
+          )}
           <form className="stack-form" onSubmit={submitItem}>
             <label>
               新しい項目名
