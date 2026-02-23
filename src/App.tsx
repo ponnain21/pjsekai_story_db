@@ -332,19 +332,17 @@ function App() {
 
   return (
     <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>ストーリー項目エディタ</h1>
-          <p>{session.user.email}</p>
-        </div>
-        <button onClick={logout}>ログアウト</button>
-      </header>
-
       {error && <p className="error global-error">{error}</p>}
 
       <section className="workspace">
         <aside className="panel sidebar">
-          <h2>項目</h2>
+          <div className="sidebar-head">
+            <h2>項目</h2>
+            <button type="button" className="ghost-button" onClick={logout}>
+              ログアウト
+            </button>
+          </div>
+          <p className="subtle">{session.user.email}</p>
           <form className="stack-form" onSubmit={submitItem}>
             <label>
               新しい項目名
