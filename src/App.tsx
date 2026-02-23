@@ -57,6 +57,7 @@ function App() {
 
   const [error, setError] = useState('')
   const singleNode = nodes[0] ?? null
+  const selectedThread = threads.find((thread) => thread.id === selectedThreadId) ?? null
 
   useEffect(() => {
     const loadSession = async () => {
@@ -324,24 +325,29 @@ function App() {
 
       {error && <p className="error global-error">{error}</p>}
 
-      <section className="columns">
-        <section className="panel">
-          <h2>スレッド</h2>
+      <section className="workspace">
+        <aside className="panel sidebar">
+          <h2>メニュー</h2>
           <p className="subtle">{singleNode ? `ノード: ${singleNode.title}` : 'ノード準備中'}</p>
-          <div className="list">
-            {threads.map((thread) => (
-              <button
-                key={thread.id}
-                className={`list-item ${selectedThreadId === thread.id ? 'active' : ''}`}
-                onClick={() => setSelectedThreadId(thread.id)}
-              >
-                {thread.title}
-              </button>
-            ))}
+
+          <div className="list thread-menu">
+            {threads.length === 0 ? (
+              <p className="subtle">スレッドがありません</p>
+            ) : (
+              threads.map((thread) => (
+                <button
+                  key={thread.id}
+                  className={`list-item menu-item ${selectedThreadId === thread.id ? 'active' : ''}`}
+                  onClick={() => setSelectedThreadId(thread.id)}
+                >
+                  {thread.title}
+                </button>
+              ))
+            )}
           </div>
 
-          <form className="stack-form" onSubmit={submitThread}>
-            <h3>スレッド追加</h3>
+          <form className="stack-form sidebar-form" onSubmit={submitThread}>
+            <h3>新規スレッド</h3>
             <label>
               タイトル
               <input
@@ -351,31 +357,41 @@ function App() {
               />
             </label>
             <button type="submit" disabled={!singleNode}>
-              追加
+              作成
             </button>
           </form>
-        </section>
+        </aside>
 
-        <section className="panel entry-panel">
-          <h2>エントリー</h2>
-          <p className="subtle">
-            {selectedThreadId ? 'チャット表示' : 'スレッドを選択してください'}
-          </p>
-          <div className="entry-list">
-            {entries.map((entry) =>
-              entry.kind === 'utterance' ? (
-                <article className="entry utterance" key={entry.id}>
-                  <p className="speaker">{entry.speaker_name || '不明'}</p>
-                  <p>{entry.content}</p>
-                </article>
-              ) : (
-                <article className={`entry divider ${entry.kind}`} key={entry.id}>
-                  <p>{entryKindLabel[entry.kind]}</p>
-                  <p>{entry.content}</p>
-                </article>
-              ),
+        <section className="panel content-area">
+          <div className="content-header">
+            <h2>{selectedThread ? selectedThread.title : 'スレッドを選択してください'}</h2>
+            <p className="subtle">
+              {selectedThread
+                ? '左メニューから切り替えて内容を確認できます'
+                : '左メニューからスレッドを選ぶと内容が表示されます'}
+            </p>
+          </div>
+
+          <div className="entry-list data-view">
+            {selectedThreadId ? (
+              entries.map((entry) =>
+                entry.kind === 'utterance' ? (
+                  <article className="entry utterance" key={entry.id}>
+                    <p className="speaker">{entry.speaker_name || '不明'}</p>
+                    <p>{entry.content}</p>
+                  </article>
+                ) : (
+                  <article className={`entry divider ${entry.kind}`} key={entry.id}>
+                    <p>{entryKindLabel[entry.kind]}</p>
+                    <p>{entry.content}</p>
+                  </article>
+                ),
+              )
+            ) : (
+              <p className="subtle">表示するデータがありません</p>
             )}
           </div>
+
           <form className="stack-form entry-form" onSubmit={submitEntry}>
             <h3>エントリー追加</h3>
             <label>
