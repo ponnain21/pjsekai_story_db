@@ -17,8 +17,24 @@ type SubItemRow = {
   scheduled_on: string | null
   tags: string[] | null
   body: string
+  sort_order: number
   created_at: string
 }
+
+type SubItemTemplateRow = {
+  id: string
+  title: string
+  scheduled_on: string | null
+  tags: string[] | null
+  body: string
+  created_at: string
+}
+
+const parseTags = (value: string) =>
+  value
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -31,7 +47,10 @@ function App() {
 
   const [items, setItems] = useState<ItemRow[]>([])
   const [subItems, setSubItems] = useState<SubItemRow[]>([])
+  const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
+
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState('')
 
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
@@ -134,8 +153,9 @@ function App() {
   const loadSubItems = async (itemId: string) => {
     const { data, error: loadError } = await supabase
       .from('threads')
-      .select('id, node_id, title, scheduled_on, tags, body, created_at')
+      .select('id, node_id, title, scheduled_on, tags, body, sort_order, created_at')
       .eq('node_id', itemId)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
@@ -146,14 +166,31 @@ function App() {
     setSubItems((data ?? []) as SubItemRow[])
   }
 
+  const loadSubItemTemplates = async () => {
+    const { data, error: loadError } = await supabase
+      .from('subitem_templates')
+      .select('id, title, scheduled_on, tags, body, created_at')
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      setError(loadError.message)
+      return
+    }
+
+    setSubItemTemplates((data ?? []) as SubItemTemplateRow[])
+  }
+
   useEffect(() => {
     if (!session || accessStatus !== 'allowed') {
       setItems([])
       setSubItems([])
+      setSubItemTemplates([])
       setSelectedItemId(null)
+      setSelectedTemplateId('')
       return
     }
     void loadItems()
+    void loadSubItemTemplates()
   }, [session, accessStatus])
 
   useEffect(() => {
@@ -253,6 +290,59 @@ function App() {
     await loadItems()
   }
 
+  const applySelectedTemplateToForm = () => {
+    setError('')
+    if (!selectedTemplateId) {
+      setError('先にテンプレートを選択してください。')
+      return
+    }
+
+    const template = subItemTemplates.find((item) => item.id === selectedTemplateId)
+    if (!template) {
+      setError('選択したテンプレートが見つかりませんでした。')
+      return
+    }
+
+    setSubItemTitle(template.title)
+    setSubItemDate(template.scheduled_on ?? '')
+    setSubItemTagsInput((template.tags ?? []).join(', '))
+    setSubItemBody(template.body)
+  }
+
+  const saveCurrentFormAsTemplate = async () => {
+    setError('')
+
+    if (!subItemTitle.trim()) {
+      setError('テンプレート保存には項目内項目名が必要です。')
+      return
+    }
+    if (!subItemBody.trim()) {
+      setError('テンプレート保存には本文が必要です。')
+      return
+    }
+
+    const tags = parseTags(subItemTagsInput)
+
+    const { data, error: insertError } = await supabase
+      .from('subitem_templates')
+      .insert({
+        title: subItemTitle.trim(),
+        scheduled_on: subItemDate || null,
+        tags,
+        body: subItemBody.trim(),
+      })
+      .select('id')
+      .single()
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    await loadSubItemTemplates()
+    if (data?.id) setSelectedTemplateId(data.id)
+  }
+
   const submitSubItem = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -270,10 +360,9 @@ function App() {
       return
     }
 
-    const tags = subItemTagsInput
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0)
+    const tags = parseTags(subItemTagsInput)
+    const nextSortOrder =
+      subItems.length === 0 ? 0 : Math.max(...subItems.map((subItem) => subItem.sort_order)) + 1
 
     const { error: insertError } = await supabase.from('threads').insert({
       node_id: selectedItemId,
@@ -281,6 +370,7 @@ function App() {
       scheduled_on: subItemDate || null,
       tags,
       body: subItemBody.trim(),
+      sort_order: nextSortOrder,
     })
 
     if (insertError) {
@@ -293,6 +383,54 @@ function App() {
     setSubItemTagsInput('')
     setSubItemBody('')
     await loadSubItems(selectedItemId)
+  }
+
+  const moveSubItem = async (subItemId: string, direction: 'up' | 'down') => {
+    if (!selectedItemId) return
+    const currentIndex = subItems.findIndex((subItem) => subItem.id === subItemId)
+    if (currentIndex < 0) return
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= subItems.length) return
+
+    const current = subItems[currentIndex]
+    const target = subItems[targetIndex]
+
+    setError('')
+
+    const { error: firstError } = await supabase
+      .from('threads')
+      .update({ sort_order: target.sort_order })
+      .eq('id', current.id)
+    if (firstError) {
+      setError(firstError.message)
+      return
+    }
+
+    const { error: secondError } = await supabase
+      .from('threads')
+      .update({ sort_order: current.sort_order })
+      .eq('id', target.id)
+    if (secondError) {
+      setError(secondError.message)
+      return
+    }
+
+    await loadSubItems(selectedItemId)
+  }
+
+  const deleteSubItem = async (subItem: SubItemRow) => {
+    setError('')
+    const confirmed = window.confirm(`項目内項目「${subItem.title}」を削除しますか？`)
+    if (!confirmed) return
+
+    const { error: deleteError } = await supabase.from('threads').delete().eq('id', subItem.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
   if (!session) {
@@ -365,6 +503,7 @@ function App() {
               </button>
             </section>
           )}
+
           <form className="stack-form item-create-form" onSubmit={submitItem}>
             <label className="sr-only" htmlFor="new-item-title">
               新しい項目名
@@ -429,7 +568,7 @@ function App() {
             <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
             <p className="subtle">
               {selectedItem
-                ? 'この項目に「項目内項目」「日付」「タグ」「本文」を追加できます。'
+                ? '項目内項目を使い回し・並べ替え・削除できます。'
                 : '左の一覧から項目を選ぶか、新しく作成してください。'}
             </p>
           </div>
@@ -439,11 +578,38 @@ function App() {
               subItems.length === 0 ? (
                 <p className="subtle">まだ項目内項目がありません</p>
               ) : (
-                subItems.map((subItem) => (
+                subItems.map((subItem, index) => (
                   <article key={subItem.id} className="subitem-card">
                     <header className="subitem-header">
-                      <h3>{subItem.title}</h3>
-                      <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
+                      <div>
+                        <h3>{subItem.title}</h3>
+                        <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
+                      </div>
+                      <div className="subitem-actions">
+                        <button
+                          type="button"
+                          className="ghost-button mini-action"
+                          onClick={() => moveSubItem(subItem.id, 'up')}
+                          disabled={index === 0}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button mini-action"
+                          onClick={() => moveSubItem(subItem.id, 'down')}
+                          disabled={index === subItems.length - 1}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="danger-button mini-action"
+                          onClick={() => deleteSubItem(subItem)}
+                        >
+                          削除
+                        </button>
+                      </div>
                     </header>
                     {subItem.tags && subItem.tags.length > 0 && (
                       <div className="tag-list">
@@ -454,7 +620,6 @@ function App() {
                         ))}
                       </div>
                     )}
-                    <p className="subitem-body">{subItem.body}</p>
                   </article>
                 ))
               )
@@ -465,6 +630,30 @@ function App() {
 
           <form className="stack-form subitem-form" onSubmit={submitSubItem}>
             <h3>項目内項目を追加</h3>
+
+            <div className="template-tools">
+              <p className="subtle">使い回しテンプレート</p>
+              <div className="template-row">
+                <select
+                  value={selectedTemplateId}
+                  onChange={(event) => setSelectedTemplateId(event.target.value)}
+                >
+                  <option value="">テンプレートを選択</option>
+                  {subItemTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.title}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="ghost-button" onClick={applySelectedTemplateToForm}>
+                  読み込み
+                </button>
+                <button type="button" className="ghost-button" onClick={saveCurrentFormAsTemplate}>
+                  現在入力を保存
+                </button>
+              </div>
+            </div>
+
             <label>
               項目内項目
               <input

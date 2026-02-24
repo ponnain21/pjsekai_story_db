@@ -139,7 +139,7 @@
 
 .subitem-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.6rem;
   margin-bottom: 0.35rem;
@@ -148,6 +148,12 @@
 .subitem-header h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.subitem-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .tag-list {
@@ -174,6 +180,23 @@
 
 .subitem-form {
   margin-top: auto;
+}
+
+.template-tools {
+  border: 1px solid #e1e8ee;
+  border-radius: 10px;
+  padding: 0.5rem;
+  background: #f9fcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.template-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.4rem;
+  align-items: center;
 }
 
 .stack-form {
@@ -276,6 +299,11 @@ button {
   padding: 0.25rem 0.5rem;
 }
 
+.mini-action {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+}
+
 .close-mini {
   font-size: 0.75rem;
   padding: 0.2rem 0.45rem;
@@ -303,5 +331,9 @@ button:disabled {
   .sidebar {
     position: static;
     max-height: none;
+  }
+
+  .template-row {
+    grid-template-columns: 1fr;
   }
 }

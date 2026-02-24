@@ -23,6 +23,7 @@ create table if not exists public.threads (
   scheduled_on date null,
   tags text[] not null default '{}',
   body text not null default '',
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -32,6 +33,17 @@ alter table if exists public.threads
   add column if not exists tags text[] not null default '{}';
 alter table if exists public.threads
   add column if not exists body text not null default '';
+alter table if exists public.threads
+  add column if not exists sort_order integer not null default 0;
+
+create table if not exists public.subitem_templates (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  scheduled_on date null,
+  tags text[] not null default '{}',
+  body text not null default '',
+  created_at timestamptz not null default now()
+);
 
 create table if not exists public.entries (
   id uuid primary key default gen_random_uuid(),
