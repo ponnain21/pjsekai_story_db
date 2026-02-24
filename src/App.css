@@ -135,6 +135,12 @@
   border-radius: 10px;
   padding: 0.6rem 0.7rem;
   background: #ffffff;
+  cursor: pointer;
+}
+
+.subitem-card.selected {
+  border-color: #1f8bc7;
+  background: #eef8ff;
 }
 
 .subitem-header {
@@ -180,6 +186,11 @@
 
 .subitem-form {
   margin-top: auto;
+}
+
+.body-editor {
+  border-top: 1px solid #d8e1e8;
+  padding-top: 0.65rem;
 }
 
 .template-tools {

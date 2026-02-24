@@ -50,6 +50,7 @@ function App() {
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+  const [selectedSubItemId, setSelectedSubItemId] = useState<string | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
 
   const [itemTitle, setItemTitle] = useState('')
@@ -57,9 +58,11 @@ function App() {
   const [subItemTitle, setSubItemTitle] = useState('')
   const [subItemDate, setSubItemDate] = useState('')
   const [subItemTagsInput, setSubItemTagsInput] = useState('')
-  const [subItemBody, setSubItemBody] = useState('')
+  const [selectedSubItemBody, setSelectedSubItemBody] = useState('')
+  const [bodySaving, setBodySaving] = useState(false)
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
+  const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
 
   useEffect(() => {
     setRenameItemTitle(selectedItem?.title ?? '')
@@ -163,7 +166,12 @@ function App() {
       return
     }
 
-    setSubItems((data ?? []) as SubItemRow[])
+    const loadedSubItems = (data ?? []) as SubItemRow[]
+    setSubItems(loadedSubItems)
+    setSelectedSubItemId((current) => {
+      if (current && loadedSubItems.some((subItem) => subItem.id === current)) return current
+      return loadedSubItems[0]?.id ?? null
+    })
   }
 
   const loadSubItemTemplates = async () => {
@@ -186,6 +194,7 @@ function App() {
       setSubItems([])
       setSubItemTemplates([])
       setSelectedItemId(null)
+      setSelectedSubItemId(null)
       setSelectedTemplateId('')
       return
     }
@@ -196,10 +205,15 @@ function App() {
   useEffect(() => {
     if (!selectedItemId) {
       setSubItems([])
+      setSelectedSubItemId(null)
       return
     }
     void loadSubItems(selectedItemId)
   }, [selectedItemId])
+
+  useEffect(() => {
+    setSelectedSubItemBody(selectedSubItem?.body ?? '')
+  }, [selectedSubItem?.id, selectedSubItem?.body])
 
   const loginWithGoogle = async () => {
     setError('')
@@ -306,7 +320,6 @@ function App() {
     setSubItemTitle(template.title)
     setSubItemDate(template.scheduled_on ?? '')
     setSubItemTagsInput((template.tags ?? []).join(', '))
-    setSubItemBody(template.body)
   }
 
   const saveCurrentFormAsTemplate = async () => {
@@ -314,10 +327,6 @@ function App() {
 
     if (!subItemTitle.trim()) {
       setError('テンプレート保存には項目内項目名が必要です。')
-      return
-    }
-    if (!subItemBody.trim()) {
-      setError('テンプレート保存には本文が必要です。')
       return
     }
 
@@ -329,7 +338,7 @@ function App() {
         title: subItemTitle.trim(),
         scheduled_on: subItemDate || null,
         tags,
-        body: subItemBody.trim(),
+        body: '',
       })
       .select('id')
       .single()
@@ -355,10 +364,6 @@ function App() {
       setError('項目内項目名は必須です。')
       return
     }
-    if (!subItemBody.trim()) {
-      setError('本文は必須です。')
-      return
-    }
 
     const tags = parseTags(subItemTagsInput)
     const nextSortOrder =
@@ -369,7 +374,7 @@ function App() {
       title: subItemTitle.trim(),
       scheduled_on: subItemDate || null,
       tags,
-      body: subItemBody.trim(),
+      body: '',
       sort_order: nextSortOrder,
     })
 
@@ -381,8 +386,27 @@ function App() {
     setSubItemTitle('')
     setSubItemDate('')
     setSubItemTagsInput('')
-    setSubItemBody('')
     await loadSubItems(selectedItemId)
+  }
+
+  const saveSelectedSubItemBody = async () => {
+    setError('')
+    if (!selectedSubItemId) {
+      setError('先に本文を編集する項目内項目を選択してください。')
+      return
+    }
+    setBodySaving(true)
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({ body: selectedSubItemBody })
+      .eq('id', selectedSubItemId)
+    setBodySaving(false)
+
+    if (updateError) {
+      setError(updateError.message)
+      return
+    }
+    if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
   const moveSubItem = async (subItemId: string, direction: 'up' | 'down') => {
@@ -579,7 +603,11 @@ function App() {
                 <p className="subtle">まだ項目内項目がありません</p>
               ) : (
                 subItems.map((subItem, index) => (
-                  <article key={subItem.id} className="subitem-card">
+                  <article
+                    key={subItem.id}
+                    className={`subitem-card ${selectedSubItemId === subItem.id ? 'selected' : ''}`}
+                    onClick={() => setSelectedSubItemId(subItem.id)}
+                  >
                     <header className="subitem-header">
                       <div>
                         <h3>{subItem.title}</h3>
@@ -589,7 +617,10 @@ function App() {
                         <button
                           type="button"
                           className="ghost-button mini-action"
-                          onClick={() => moveSubItem(subItem.id, 'up')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void moveSubItem(subItem.id, 'up')
+                          }}
                           disabled={index === 0}
                         >
                           ↑
@@ -597,7 +628,10 @@ function App() {
                         <button
                           type="button"
                           className="ghost-button mini-action"
-                          onClick={() => moveSubItem(subItem.id, 'down')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void moveSubItem(subItem.id, 'down')
+                          }}
                           disabled={index === subItems.length - 1}
                         >
                           ↓
@@ -605,7 +639,10 @@ function App() {
                         <button
                           type="button"
                           className="danger-button mini-action"
-                          onClick={() => deleteSubItem(subItem)}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void deleteSubItem(subItem)
+                          }}
                         >
                           削除
                         </button>
@@ -679,20 +716,29 @@ function App() {
                 placeholder="例: 重要, イベント, 修正待ち"
               />
             </label>
-            <label>
-              本文
-              <textarea
-                rows={6}
-                value={subItemBody}
-                onChange={(event) => setSubItemBody(event.target.value)}
-                placeholder="項目内項目の本文を入力"
-                required
-              />
-            </label>
             <button type="submit" disabled={!selectedItemId}>
               項目内項目を追加
             </button>
           </form>
+
+          <section className="stack-form body-editor">
+            <h3>本文入力</h3>
+            <p className="subtle">
+              {selectedSubItem
+                ? `選択中: ${selectedSubItem.title}`
+                : '本文を入力する項目内項目を上の一覧から選択してください'}
+            </p>
+            <textarea
+              rows={8}
+              value={selectedSubItemBody}
+              onChange={(event) => setSelectedSubItemBody(event.target.value)}
+              placeholder="ここに本文を入力"
+              disabled={!selectedSubItem}
+            />
+            <button type="button" onClick={saveSelectedSubItemBody} disabled={!selectedSubItem || bodySaving}>
+              {bodySaving ? '保存中...' : '本文を保存'}
+            </button>
+          </section>
         </section>
       </section>
     </main>
