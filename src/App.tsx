@@ -35,6 +35,19 @@ type TagPresetRow = {
   created_at: string
 }
 
+type PresetDialogState = {
+  kind: 'template' | 'tag'
+  mode: 'create' | 'edit'
+  id: string | null
+}
+
+type ConfirmDialogState = {
+  title: string
+  message: string
+  confirmLabel: string
+  onConfirm: () => Promise<void>
+}
+
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
 
 function App() {
@@ -60,39 +73,20 @@ function App() {
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
 
-  const [settingsTemplateTitle, setSettingsTemplateTitle] = useState('')
-  const [settingsTagName, setSettingsTagName] = useState('')
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
-  const [mainTemplateTitle, setMainTemplateTitle] = useState('')
-  const [mainNewTagName, setMainNewTagName] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
+  const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
+  const [presetNameDraft, setPresetNameDraft] = useState('')
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
+  const [dialogBusy, setDialogBusy] = useState(false)
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
-  const selectedSettingsTemplate =
-    subItemTemplates.find((template) => template.id === selectedSettingsTemplateId) ?? null
-  const selectedSettingsTag = tagPresets.find((tag) => tag.id === selectedSettingsTagId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
 
   useEffect(() => {
     setRenameItemTitle(selectedItem?.title ?? '')
   }, [selectedItem?.id, selectedItem?.title])
-
-  useEffect(() => {
-    if (!selectedSettingsTemplate) {
-      setSettingsTemplateTitle('')
-      return
-    }
-    setSettingsTemplateTitle(selectedSettingsTemplate.title)
-  }, [selectedSettingsTemplate?.id])
-
-  useEffect(() => {
-    if (!selectedSettingsTag) {
-      setSettingsTagName('')
-      return
-    }
-    setSettingsTagName(selectedSettingsTag.name)
-  }, [selectedSettingsTag?.id])
 
   useEffect(() => {
     setMainScheduledOn(selectedItem?.scheduled_on ?? '')
@@ -236,7 +230,12 @@ function App() {
       return
     }
 
-    setSubItemTemplates((data ?? []) as SubItemTemplateRow[])
+    const loadedTemplates = (data ?? []) as SubItemTemplateRow[]
+    setSubItemTemplates(loadedTemplates)
+    setSelectedSettingsTemplateId((current) => {
+      if (current && loadedTemplates.some((template) => template.id === current)) return current
+      return loadedTemplates[0]?.id ?? null
+    })
   }
 
   const loadTagPresets = async () => {
@@ -360,9 +359,6 @@ function App() {
       return
     }
 
-    const confirmed = window.confirm(`「${selectedItem.title}」を削除しますか？`)
-    if (!confirmed) return
-
     const { error: deleteError } = await supabase.from('nodes').delete().eq('id', selectedItem.id)
     if (deleteError) {
       setError(deleteError.message)
@@ -400,215 +396,213 @@ function App() {
     await saveItemMeta(value, mainSelectedTags)
   }
 
-  const toggleMainTag = async (name: string) => {
-    const nextTags = mainSelectedTags.includes(name)
-      ? mainSelectedTags.filter((tag) => tag !== name)
-      : [...mainSelectedTags, name]
-    setMainSelectedTags(nextTags)
-    await saveItemMeta(mainScheduledOn, nextTags)
+  const openConfirmDialog = (dialog: ConfirmDialogState) => {
+    setConfirmDialog(dialog)
   }
 
-  const createTagPresetFromSettings = async () => {
+  const executeConfirmDialog = async () => {
+    if (!confirmDialog || dialogBusy) return
+    setDialogBusy(true)
+    try {
+      await confirmDialog.onConfirm()
+      setConfirmDialog(null)
+    } finally {
+      setDialogBusy(false)
+    }
+  }
+
+  const openCreatePresetDialog = (kind: 'template' | 'tag') => {
+    setPresetNameDraft('')
+    setPresetDialog({ kind, mode: 'create', id: null })
+  }
+
+  const openEditPresetDialog = (kind: 'template' | 'tag', id: string) => {
+    if (kind === 'template') {
+      const template = subItemTemplates.find((current) => current.id === id)
+      if (!template) return
+      setSelectedSettingsTemplateId(template.id)
+      setPresetNameDraft(template.title)
+      setPresetDialog({ kind: 'template', mode: 'edit', id: template.id })
+      return
+    }
+
+    const tag = tagPresets.find((current) => current.id === id)
+    if (!tag) return
+    setSelectedSettingsTagId(tag.id)
+    setPresetNameDraft(tag.name)
+    setPresetDialog({ kind: 'tag', mode: 'edit', id: tag.id })
+  }
+
+  const submitPresetDialog = async () => {
+    if (!presetDialog || dialogBusy) return
     setError('')
-    const trimmed = settingsTagName.trim()
+
+    const trimmed = presetNameDraft.trim()
     if (!trimmed) {
-      setError('追加するタグ名を入力してください。')
+      setError('名称を入力してください。')
       return
     }
 
-    const { data, error: insertError } = await supabase
-      .from('subitem_tag_presets')
-      .upsert({ name: trimmed }, { onConflict: 'name' })
-      .select('id')
-      .single()
+    setDialogBusy(true)
+    try {
+      if (presetDialog.kind === 'template') {
+        if (presetDialog.mode === 'create') {
+          const { data, error: insertError } = await supabase
+            .from('subitem_templates')
+            .insert({
+              title: trimmed,
+              scheduled_on: null,
+              tags: [],
+              body: '',
+            })
+            .select('id')
+            .single()
+          if (insertError) {
+            setError(insertError.message)
+            return
+          }
+          await loadSubItemTemplates()
+          if (data?.id) setSelectedSettingsTemplateId(data.id)
+        } else {
+          if (!presetDialog.id) {
+            setError('更新する項目内項目が見つかりません。')
+            return
+          }
+          const { error: updateError } = await supabase
+            .from('subitem_templates')
+            .update({ title: trimmed })
+            .eq('id', presetDialog.id)
+          if (updateError) {
+            setError(updateError.message)
+            return
+          }
+          await loadSubItemTemplates()
+        }
+      } else {
+        if (presetDialog.mode === 'create') {
+          const { data, error: insertError } = await supabase
+            .from('subitem_tag_presets')
+            .upsert({ name: trimmed }, { onConflict: 'name' })
+            .select('id')
+            .single()
+          if (insertError) {
+            setError(insertError.message)
+            return
+          }
+          await loadTagPresets()
+          if (data?.id) setSelectedSettingsTagId(data.id)
+        } else {
+          if (!presetDialog.id) {
+            setError('更新するタグが見つかりません。')
+            return
+          }
+          const { error: updateError } = await supabase
+            .from('subitem_tag_presets')
+            .update({ name: trimmed })
+            .eq('id', presetDialog.id)
+          if (updateError) {
+            setError(updateError.message)
+            return
+          }
+          await loadTagPresets()
+        }
+      }
 
-    if (insertError) {
-      setError(insertError.message)
-      return
+      setPresetDialog(null)
+    } finally {
+      setDialogBusy(false)
     }
-
-    setSettingsTagName('')
-    await loadTagPresets()
-    if (data?.id) setSelectedSettingsTagId(data.id)
   }
 
-  const addTagPresetFromMain = async () => {
-    setError('')
-    const trimmed = mainNewTagName.trim()
-    if (!trimmed) {
-      setError('追加するタグ名を入力してください。')
-      return
-    }
+  const requestDeleteFromPresetDialog = () => {
+    if (!presetDialog || presetDialog.mode !== 'edit' || !presetDialog.id) return
 
-    const { error: insertError } = await supabase
-      .from('subitem_tag_presets')
-      .upsert({ name: trimmed }, { onConflict: 'name', ignoreDuplicates: true })
-
-    if (insertError) {
-      setError(insertError.message)
-      return
-    }
-
-    const nextTags = uniqueStrings([...mainSelectedTags, trimmed])
-    setMainSelectedTags(nextTags)
-    setMainNewTagName('')
-    await loadTagPresets()
-    await saveItemMeta(mainScheduledOn, nextTags)
-  }
-
-  const updateSelectedTagFromSettings = async () => {
-    setError('')
-
-    if (!selectedSettingsTagId) {
-      setError('更新するタグを一覧から選択してください。')
-      return
-    }
-    if (!settingsTagName.trim()) {
-      setError('タグ名を入力してください。')
-      return
-    }
-
-    const { error: updateError } = await supabase
-      .from('subitem_tag_presets')
-      .update({ name: settingsTagName.trim() })
-      .eq('id', selectedSettingsTagId)
-
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
-
-    await loadTagPresets()
-  }
-
-  const deleteSelectedTagFromSettings = async () => {
-    setError('')
-
-    if (!selectedSettingsTag) {
-      setError('削除するタグを一覧から選択してください。')
-      return
-    }
-
-    const confirmed = window.confirm(`タグ「${selectedSettingsTag.name}」を削除しますか？`)
-    if (!confirmed) return
-
-    const { error: deleteError } = await supabase
-      .from('subitem_tag_presets')
-      .delete()
-      .eq('id', selectedSettingsTag.id)
-    if (deleteError) {
-      setError(deleteError.message)
-      return
-    }
-
-    await loadTagPresets()
-    const nextTags = mainSelectedTags.filter((name) => name !== selectedSettingsTag.name)
-    setMainSelectedTags(nextTags)
-    await saveItemMeta(mainScheduledOn, nextTags)
-  }
-
-  const createTemplateFromSettings = async () => {
-    setError('')
-
-    if (!settingsTemplateTitle.trim()) {
-      setError('項目内項目名を入力してください。')
-      return
-    }
-
-    const { data, error: insertError } = await supabase
-      .from('subitem_templates')
-      .insert({
-        title: settingsTemplateTitle.trim(),
-        scheduled_on: null,
-        tags: [],
-        body: '',
+    if (presetDialog.kind === 'template') {
+      const template = subItemTemplates.find((current) => current.id === presetDialog.id)
+      if (!template) return
+      openConfirmDialog({
+        title: '項目内項目の削除',
+        message: `「${template.title}」を削除します。`,
+        confirmLabel: '削除する',
+        onConfirm: async () => {
+          const { error: deleteError } = await supabase.from('subitem_templates').delete().eq('id', template.id)
+          if (deleteError) {
+            setError(deleteError.message)
+            return
+          }
+          await loadSubItemTemplates()
+          setPresetDialog(null)
+        },
       })
-      .select('id')
-      .single()
-
-    if (insertError) {
-      setError(insertError.message)
       return
     }
 
-    await loadSubItemTemplates()
-    if (data?.id) setSelectedSettingsTemplateId(data.id)
-  }
-
-  const createTemplateFromMain = async () => {
-    setError('')
-
-    if (!mainTemplateTitle.trim()) {
-      setError('追加する項目内項目名を入力してください。')
-      return
-    }
-
-    const { error: insertError } = await supabase.from('subitem_templates').insert({
-      title: mainTemplateTitle.trim(),
-      scheduled_on: null,
-      tags: [],
-      body: '',
+    const tag = tagPresets.find((current) => current.id === presetDialog.id)
+    if (!tag) return
+    openConfirmDialog({
+      title: 'タグの削除',
+      message: `「${tag.name}」を削除します。`,
+      confirmLabel: '削除する',
+      onConfirm: async () => {
+        const { error: deleteError } = await supabase.from('subitem_tag_presets').delete().eq('id', tag.id)
+        if (deleteError) {
+          setError(deleteError.message)
+          return
+        }
+        await loadTagPresets()
+        const nextTags = mainSelectedTags.filter((name) => name !== tag.name)
+        setMainSelectedTags(nextTags)
+        await saveItemMeta(mainScheduledOn, nextTags)
+        setPresetDialog(null)
+      },
     })
-
-    if (insertError) {
-      setError(insertError.message)
-      return
-    }
-
-    setMainTemplateTitle('')
-    await loadSubItemTemplates()
   }
 
-  const updateSelectedTemplate = async () => {
-    setError('')
-
-    if (!selectedSettingsTemplateId) {
-      setError('更新する項目内項目を一覧から選択してください。')
+  const handleSettingsTemplateButton = (template: SubItemTemplateRow) => {
+    if (selectedSettingsTemplateId === template.id) {
+      openEditPresetDialog('template', template.id)
       return
     }
-    if (!settingsTemplateTitle.trim()) {
-      setError('項目内項目名を入力してください。')
-      return
-    }
-
-    const { error: updateError } = await supabase
-      .from('subitem_templates')
-      .update({
-        title: settingsTemplateTitle.trim(),
-      })
-      .eq('id', selectedSettingsTemplateId)
-
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
-
-    await loadSubItemTemplates()
+    setSelectedSettingsTemplateId(template.id)
   }
 
-  const deleteSelectedTemplate = async () => {
-    setError('')
+  const handleMainTemplateButton = async (template: SubItemTemplateRow) => {
+    if (selectedSettingsTemplateId === template.id) {
+      openEditPresetDialog('template', template.id)
+      return
+    }
+    setSelectedSettingsTemplateId(template.id)
+    await addSubItemFromTemplate(template)
+  }
 
-    if (!selectedSettingsTemplate) {
-      setError('削除する項目内項目を一覧から選択してください。')
+  const removeMainTag = async (name: string) => {
+    const nextTags = mainSelectedTags.filter((tag) => tag !== name)
+    setMainSelectedTags(nextTags)
+    await saveItemMeta(mainScheduledOn, nextTags)
+  }
+
+  const handleSettingsTagButton = (tag: TagPresetRow) => {
+    if (selectedSettingsTagId === tag.id) {
+      openEditPresetDialog('tag', tag.id)
+      return
+    }
+    setSelectedSettingsTagId(tag.id)
+  }
+
+  const handleMainTagButton = async (tag: TagPresetRow) => {
+    if (mainSelectedTags.includes(tag.name)) {
+      if (selectedSettingsTagId === tag.id) {
+        openEditPresetDialog('tag', tag.id)
+        return
+      }
+      setSelectedSettingsTagId(tag.id)
       return
     }
 
-    const confirmed = window.confirm(`項目内項目「${selectedSettingsTemplate.title}」を削除しますか？`)
-    if (!confirmed) return
-
-    const { error: deleteError } = await supabase
-      .from('subitem_templates')
-      .delete()
-      .eq('id', selectedSettingsTemplate.id)
-
-    if (deleteError) {
-      setError(deleteError.message)
-      return
-    }
-
-    setSelectedSettingsTemplateId(null)
-    await loadSubItemTemplates()
+    const nextTags = uniqueStrings([...mainSelectedTags, tag.name])
+    setMainSelectedTags(nextTags)
+    setSelectedSettingsTagId(tag.id)
+    await saveItemMeta(mainScheduledOn, nextTags)
   }
 
   const addSubItemFromTemplate = async (template: SubItemTemplateRow) => {
@@ -676,8 +670,6 @@ function App() {
 
   const deleteSubItem = async (subItem: SubItemRow) => {
     setError('')
-    const confirmed = window.confirm(`項目内項目「${subItem.title}」を削除しますか？`)
-    if (!confirmed) return
 
     const { error: deleteError } = await supabase.from('threads').delete().eq('id', subItem.id)
     if (deleteError) {
@@ -812,7 +804,14 @@ function App() {
               <button
                 type="button"
                 className="danger-button"
-                onClick={deleteSelectedItem}
+                onClick={() =>
+                  openConfirmDialog({
+                    title: '項目の削除',
+                    message: selectedItem ? `「${selectedItem.title}」を削除します。` : '項目を削除します。',
+                    confirmLabel: '削除する',
+                    onConfirm: deleteSelectedItem,
+                  })
+                }
                 disabled={!selectedItemId}
               >
                 項目削除
@@ -827,6 +826,10 @@ function App() {
 
             <section className="settings-section">
               <h3>項目内項目設定</h3>
+              <p className="subtle">同じボタンをもう一度押すと詳細ウインドウを開きます。</p>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
+                ＋ 項目内項目を作成
+              </button>
               <div className="template-button-list">
                 {subItemTemplates.length === 0 ? (
                   <p className="subtle">項目内項目はまだありません</p>
@@ -838,46 +841,21 @@ function App() {
                       className={`ghost-button template-button ${
                         selectedSettingsTemplateId === template.id ? 'active' : ''
                       }`}
-                      onClick={() => setSelectedSettingsTemplateId(template.id)}
+                      onClick={() => handleSettingsTemplateButton(template)}
                     >
                       {template.title}
                     </button>
                   ))
                 )}
               </div>
-              <label>
-                項目内項目名
-                <input
-                  value={settingsTemplateTitle}
-                  onChange={(event) => setSettingsTemplateTitle(event.target.value)}
-                  placeholder="例: 導入シーン"
-                />
-              </label>
-              <div className="settings-template-actions">
-                <button type="button" onClick={createTemplateFromSettings}>
-                  項目内項目追加
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={updateSelectedTemplate}
-                  disabled={!selectedSettingsTemplateId}
-                >
-                  選択更新
-                </button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={deleteSelectedTemplate}
-                  disabled={!selectedSettingsTemplateId}
-                >
-                  選択削除
-                </button>
-              </div>
             </section>
 
             <section className="settings-section">
               <h3>項目タグ設定</h3>
+              <p className="subtle">同じボタンをもう一度押すと詳細ウインドウを開きます。</p>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
+                ＋ タグを作成
+              </button>
               <div className="template-button-list">
                 {tagPresets.length === 0 ? (
                   <p className="subtle">タグはまだありません</p>
@@ -889,41 +867,12 @@ function App() {
                       className={`ghost-button template-button ${
                         selectedSettingsTagId === tag.id ? 'active' : ''
                       }`}
-                      onClick={() => setSelectedSettingsTagId(tag.id)}
+                      onClick={() => handleSettingsTagButton(tag)}
                     >
                       {tag.name}
                     </button>
                   ))
                 )}
-              </div>
-              <label>
-                項目タグ名
-                <input
-                  value={settingsTagName}
-                  onChange={(event) => setSettingsTagName(event.target.value)}
-                  placeholder="例: 感動"
-                />
-              </label>
-              <div className="settings-template-actions">
-                <button type="button" onClick={createTagPresetFromSettings}>
-                  タグ追加
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={updateSelectedTagFromSettings}
-                  disabled={!selectedSettingsTagId}
-                >
-                  選択更新
-                </button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={deleteSelectedTagFromSettings}
-                  disabled={!selectedSettingsTagId}
-                >
-                  選択削除
-                </button>
               </div>
             </section>
 
@@ -984,7 +933,16 @@ function App() {
                             <button
                               type="button"
                               className="danger-button mini-action"
-                              onClick={() => void deleteSubItem(subItem)}
+                              onClick={() =>
+                                openConfirmDialog({
+                                  title: '項目内項目の削除',
+                                  message: `「${subItem.title}」を削除します。`,
+                                  confirmLabel: '削除する',
+                                  onConfirm: async () => {
+                                    await deleteSubItem(subItem)
+                                  },
+                                })
+                              }
                             >
                               削除
                             </button>
@@ -1031,9 +989,13 @@ function App() {
 
             <section className="main-section">
               <h3>項目タグ</h3>
+              <p className="subtle">選択中タグを再クリックすると、タグ設定ウインドウを開きます。</p>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
+                ＋ タグを作成
+              </button>
               <div className="tag-picker">
                 {tagPresets.length === 0 ? (
-                  <p className="subtle">タグがありません。下から追加できます</p>
+                  <p className="subtle">タグがありません。上のボタンで作成してください</p>
                 ) : (
                   tagPresets.map((tag) => (
                     <button
@@ -1042,7 +1004,7 @@ function App() {
                       className={`ghost-button tag-preset-button ${
                         mainSelectedTags.includes(tag.name) ? 'active' : ''
                       }`}
-                      onClick={() => void toggleMainTag(tag.name)}
+                      onClick={() => void handleMainTagButton(tag)}
                       disabled={!selectedItemId}
                     >
                       {tag.name}
@@ -1050,42 +1012,40 @@ function App() {
                   ))
                 )}
               </div>
-              <div className="main-create-row">
-                <input
-                  value={mainNewTagName}
-                  onChange={(event) => setMainNewTagName(event.target.value)}
-                  placeholder="新しいタグ名"
-                  disabled={!selectedItemId}
-                />
-                <button type="button" onClick={addTagPresetFromMain} disabled={!selectedItemId}>
-                  タグ追加
-                </button>
-              </div>
+              {mainSelectedTags.length > 0 && (
+                <div className="selected-tag-list">
+                  {mainSelectedTags.map((tagName) => (
+                    <button
+                      key={tagName}
+                      type="button"
+                      className="selected-tag-chip"
+                      onClick={() => void removeMainTag(tagName)}
+                    >
+                      {tagName} ×
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="main-section subitem-form">
               <h3>項目内項目追加</h3>
-              <div className="main-create-row">
-                <input
-                  value={mainTemplateTitle}
-                  onChange={(event) => setMainTemplateTitle(event.target.value)}
-                  placeholder="新しい項目内項目名"
-                  disabled={!selectedItemId}
-                />
-                <button type="button" onClick={createTemplateFromMain} disabled={!selectedItemId}>
-                  項目内項目を追加
-                </button>
-              </div>
+              <p className="subtle">同じテンプレートを続けて押すと詳細ウインドウを開きます。</p>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
+                ＋ 項目内項目を作成
+              </button>
               <div className="template-button-list">
                 {subItemTemplates.length === 0 ? (
-                  <p className="subtle">項目内項目がありません。上から追加できます</p>
+                  <p className="subtle">項目内項目がありません。上のボタンで作成してください</p>
                 ) : (
                   subItemTemplates.map((template) => (
                     <button
                       key={template.id}
                       type="button"
-                      className="ghost-button template-button"
-                      onClick={() => void addSubItemFromTemplate(template)}
+                      className={`ghost-button template-button ${
+                        selectedSettingsTemplateId === template.id ? 'active' : ''
+                      }`}
+                      onClick={() => void handleMainTemplateButton(template)}
                       disabled={!selectedItemId}
                     >
                       {template.title}
@@ -1097,6 +1057,76 @@ function App() {
           </section>
         )}
       </section>
+
+      {presetDialog && (
+        <div className="overlay">
+          <section className="dialog-panel">
+            <h2>
+              {presetDialog.kind === 'template'
+                ? presetDialog.mode === 'create'
+                  ? '項目内項目を作成'
+                  : '項目内項目の詳細設定'
+                : presetDialog.mode === 'create'
+                  ? 'タグを作成'
+                  : 'タグの詳細設定'}
+            </h2>
+            <label>
+              名称
+              <input
+                value={presetNameDraft}
+                onChange={(event) => setPresetNameDraft(event.target.value)}
+                placeholder="名称を入力"
+                disabled={dialogBusy}
+              />
+            </label>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setPresetDialog(null)}
+                disabled={dialogBusy}
+              >
+                閉じる
+              </button>
+              {presetDialog.mode === 'edit' && (
+                <button
+                  type="button"
+                  className="danger-button"
+                  onClick={requestDeleteFromPresetDialog}
+                  disabled={dialogBusy}
+                >
+                  削除
+                </button>
+              )}
+              <button type="button" onClick={submitPresetDialog} disabled={dialogBusy}>
+                {presetDialog.mode === 'create' ? '作成' : '保存'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div className="overlay">
+          <section className="dialog-panel dialog-confirm">
+            <h2>{confirmDialog.title}</h2>
+            <p className="subtle">{confirmDialog.message}</p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setConfirmDialog(null)}
+                disabled={dialogBusy}
+              >
+                キャンセル
+              </button>
+              <button type="button" className="danger-button" onClick={executeConfirmDialog} disabled={dialogBusy}>
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   )
 }

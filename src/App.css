@@ -256,17 +256,50 @@
   color: #155f8d;
 }
 
-.main-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.45rem;
-  align-items: center;
+.selected-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
-.settings-template-actions {
+.selected-tag-chip {
+  border: 1px solid #a4cce0;
+  background: #edf8ff;
+  color: #0e6d9f;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(19 27 34 / 46%);
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
+  place-items: center;
+  padding: 1rem;
+}
+
+.dialog-panel {
+  width: min(34rem, 100%);
+  background: #ffffff;
+  border: 1px solid #d8e1e8;
+  border-radius: 12px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.dialog-confirm {
+  width: min(28rem, 100%);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
 }
 
 .settings-footer {
@@ -385,12 +418,11 @@ button:disabled {
     max-height: none;
   }
 
-  .settings-template-actions {
+  .item-create-row {
     grid-template-columns: 1fr;
   }
 
-  .item-create-row,
-  .main-create-row {
-    grid-template-columns: 1fr;
+  .dialog-actions {
+    flex-direction: column;
   }
 }
