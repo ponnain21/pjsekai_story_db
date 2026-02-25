@@ -124,6 +124,22 @@
   gap: 0.25rem;
 }
 
+.body-page-head {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.body-page-section {
+  flex: 1;
+  min-height: 0;
+}
+
+.body-page-section .body-editor {
+  min-height: min(58vh, 34rem);
+}
+
 .subitem-list {
   min-height: 0;
   overflow: auto;
@@ -458,5 +474,10 @@ button:disabled {
 
   .dialog-actions {
     flex-direction: column;
+  }
+
+  .body-page-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

@@ -78,7 +78,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const [pageMode, setPageMode] = useState<'main' | 'settings'>('main')
+  const [pageMode, setPageMode] = useState<'main' | 'settings' | 'subitemBody'>('main')
 
   const [items, setItems] = useState<ItemRow[]>([])
   const [subItems, setSubItems] = useState<SubItemRow[]>([])
@@ -113,6 +113,12 @@ function App() {
   useEffect(() => {
     setSubItemBodyDraft(selectedSubItem?.body ?? '')
   }, [selectedSubItem?.id, selectedSubItem?.body])
+
+  useEffect(() => {
+    if (pageMode === 'subitemBody' && !selectedSubItemId) {
+      setPageMode('main')
+    }
+  }, [pageMode, selectedSubItemId])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -753,6 +759,14 @@ function App() {
       return
     }
     setSelectedItemId(item.id)
+    if (pageMode === 'subitemBody') {
+      setPageMode('main')
+    }
+  }
+
+  const openSubItemBodyPage = (subItem: SubItemRow) => {
+    setSelectedSubItemId(subItem.id)
+    setPageMode('subitemBody')
   }
 
   const handleMainTemplateButton = (template: SubItemTemplateRow) => {
@@ -920,9 +934,9 @@ function App() {
             <button
               type="button"
               className="ghost-button logout-mini"
-              onClick={() => setPageMode((current) => (current === 'main' ? 'settings' : 'main'))}
+              onClick={() => setPageMode((current) => (current === 'settings' ? 'main' : 'settings'))}
             >
-              {pageMode === 'main' ? '設定' : '戻る'}
+              {pageMode === 'settings' ? '戻る' : '設定'}
             </button>
           </div>
 
@@ -1041,201 +1055,220 @@ function App() {
           </section>
         ) : (
           <section className="panel content-panel">
-            <div className="content-head">
-              <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
-              <p className="subtle">
-                {selectedItem
-                  ? '構造: 項目内項目 -> 本文、項目 -> 日付/項目タグ'
-                  : '左の一覧から項目を選ぶか、新しく作成してください。'}
-              </p>
-            </div>
-
-            <section className="main-section">
-              <h3>項目内項目一覧</h3>
-              <div className="subitem-list">
-                {selectedItemId ? (
-                  subItems.length === 0 ? (
-                    <p className="subtle">まだ項目内項目がありません</p>
-                  ) : (
-                    subItems.map((subItem) => (
-                      <article
-                        key={subItem.id}
-                        className={`subitem-card ${selectedSubItemId === subItem.id ? 'active' : ''} ${
-                          dragState?.kind === 'subitem' && dragState.id === subItem.id ? 'dragging' : ''
-                        }`}
-                        draggable
-                        onDragStart={(event) => startSortDrag('subitem', subItem.id, event)}
-                        onDragOver={(event) => allowSortDrop('subitem', subItem.id, event)}
-                        onDrop={(event) => void dropSort('subitem', subItem.id, event)}
-                        onDragEnd={() => setDragState(null)}
-                      >
-                        <header className="subitem-header">
-                          <button
-                            type="button"
-                            className="subitem-select"
-                            onClick={() => setSelectedSubItemId(subItem.id)}
-                          >
-                            {subItem.title}
-                          </button>
-                          <div className="subitem-actions">
-                            <button
-                              type="button"
-                              className="danger-button mini-action"
-                              onClick={() =>
-                                openConfirmDialog({
-                                  title: '項目内項目の削除',
-                                  message: `「${subItem.title}」を削除します。`,
-                                  confirmLabel: '削除する',
-                                  onConfirm: async () => {
-                                    await deleteSubItem(subItem)
-                                  },
-                                })
-                              }
-                            >
-                              削除
-                            </button>
-                          </div>
-                        </header>
-                      </article>
-                    ))
-                  )
-                ) : (
-                  <p className="subtle">項目を選択するとここにデータが表示されます</p>
-                )}
-              </div>
-            </section>
-
-            <section className="main-section">
-              <h3>本文</h3>
-              {selectedSubItem ? (
-                <>
-                  <p className="subtle">選択中: {selectedSubItem.title}</p>
-                  <textarea
-                    className="body-editor"
-                    value={subItemBodyDraft}
-                    onChange={(event) => setSubItemBodyDraft(event.target.value)}
-                    placeholder="ここに本文を入力"
-                  />
-                  <button type="button" onClick={saveSelectedSubItemBody}>
-                    本文を保存
+            {pageMode === 'subitemBody' ? (
+              <>
+                <div className="content-head body-page-head">
+                  <div>
+                    <h2>本文</h2>
+                    <p className="subtle">
+                      {selectedItem && selectedSubItem
+                        ? `項目: ${selectedItem.title} / 項目内項目: ${selectedSubItem.title}`
+                        : '本文を表示する項目内項目を選択してください。'}
+                    </p>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => setPageMode('main')}>
+                    項目ページへ戻る
                   </button>
-                </>
-              ) : (
-                <p className="subtle">本文を編集する項目内項目を一覧から選択してください</p>
-              )}
-            </section>
-
-            <section className="main-section">
-              <h3>日付</h3>
-              <input
-                type="date"
-                value={mainScheduledOn}
-                onChange={(event) => void handleMainDateChange(event.target.value)}
-                disabled={!selectedItemId}
-              />
-            </section>
-
-            <section className="main-section">
-              <h3>項目タグ</h3>
-              <p className="subtle">選択中タグを再クリックすると、タグ設定ウインドウを開きます。</p>
-              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
-                ＋ タグを作成
-              </button>
-              <div className="tag-picker">
-                {tagPresets.length === 0 ? (
-                  <p className="subtle">タグがありません。上のボタンで作成してください</p>
-                ) : (
-                  tagPresets.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`ghost-button tag-preset-button ${
-                        mainSelectedTags.includes(tag.name) ? 'active' : ''
-                      } ${dragState?.kind === 'tag' && dragState.id === tag.id ? 'dragging' : ''}`}
-                      onClick={() => void handleMainTagButton(tag)}
-                      disabled={!selectedItemId}
-                      draggable
-                      onDragStart={(event) => startSortDrag('tag', tag.id, event)}
-                      onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
-                      onDrop={(event) => void dropSort('tag', tag.id, event)}
-                      onDragEnd={() => setDragState(null)}
-                    >
-                      {tag.name}
-                    </button>
-                  ))
-                )}
-              </div>
-              {mainSelectedTags.length > 0 && (
-                <div className="selected-tag-list">
-                  {mainSelectedTags.map((tagName) => (
-                    <button
-                      key={tagName}
-                      type="button"
-                      className="selected-tag-chip"
-                      onClick={() => void removeMainTag(tagName)}
-                    >
-                      {tagName} ×
-                    </button>
-                  ))}
                 </div>
-              )}
-            </section>
 
-            <section className="main-section subitem-form">
-              <h3>項目内項目追加</h3>
-              <p className="subtle">複数選択して一括追加できます。選択済みを再クリックすると詳細ウインドウを開きます。</p>
-              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
-                ＋ 項目内項目を作成
-              </button>
-              <div className="template-button-list">
-                {subItemTemplates.length === 0 ? (
-                  <p className="subtle">項目内項目がありません。上のボタンで作成してください</p>
-                ) : (
-                  subItemTemplates.map((template) => (
-                    <button
-                      key={template.id}
-                      type="button"
-                      className={`ghost-button template-button ${
-                        mainSelectedTemplateIds.includes(template.id) ? 'active' : ''
-                      } ${dragState?.kind === 'template' && dragState.id === template.id ? 'dragging' : ''}`}
-                      onClick={() => void handleMainTemplateButton(template)}
-                      disabled={!selectedItemId}
-                      draggable
-                      onDragStart={(event) => startSortDrag('template', template.id, event)}
-                      onDragOver={(event) => allowSortDrop('template', template.id, event)}
-                      onDrop={(event) => void dropSort('template', template.id, event)}
-                      onDragEnd={() => setDragState(null)}
-                    >
-                      {template.title}
-                    </button>
-                  ))
-                )}
-              </div>
-              {mainSelectedTemplateIds.length > 0 && (
-                <div className="selected-template-list">
-                  {mainSelectedTemplateIds.map((templateId) => {
-                    const templateName = subItemTemplates.find((template) => template.id === templateId)?.title ?? templateId
-                    return (
-                      <button
-                        key={templateId}
-                        type="button"
-                        className="selected-template-chip"
-                        onClick={() => removeMainTemplateSelection(templateId)}
-                      >
-                        {templateName} ×
+                <section className="main-section body-page-section">
+                  {selectedSubItem ? (
+                    <>
+                      <textarea
+                        className="body-editor"
+                        value={subItemBodyDraft}
+                        onChange={(event) => setSubItemBodyDraft(event.target.value)}
+                        placeholder="ここに本文を入力"
+                      />
+                      <button type="button" onClick={saveSelectedSubItemBody}>
+                        本文を保存
                       </button>
-                    )
-                  })}
+                    </>
+                  ) : (
+                    <p className="subtle">項目ページで項目内項目を選択してから本文ページを開いてください。</p>
+                  )}
+                </section>
+              </>
+            ) : (
+              <>
+                <div className="content-head">
+                  <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
+                  <p className="subtle">
+                    {selectedItem
+                      ? '構造: 項目内項目 -> 本文、項目 -> 日付/項目タグ'
+                      : '左の一覧から項目を選ぶか、新しく作成してください。'}
+                  </p>
                 </div>
-              )}
-              <button
-                type="button"
-                onClick={addSelectedTemplatesToItem}
-                disabled={!selectedItemId || mainSelectedTemplateIds.length === 0}
-              >
-                選択した項目内項目を追加
-              </button>
-            </section>
+
+                <section className="main-section">
+                  <h3>項目内項目一覧</h3>
+                  <div className="subitem-list">
+                    {selectedItemId ? (
+                      subItems.length === 0 ? (
+                        <p className="subtle">まだ項目内項目がありません</p>
+                      ) : (
+                        subItems.map((subItem) => (
+                          <article
+                            key={subItem.id}
+                            className={`subitem-card ${selectedSubItemId === subItem.id ? 'active' : ''} ${
+                              dragState?.kind === 'subitem' && dragState.id === subItem.id ? 'dragging' : ''
+                            }`}
+                            draggable
+                            onDragStart={(event) => startSortDrag('subitem', subItem.id, event)}
+                            onDragOver={(event) => allowSortDrop('subitem', subItem.id, event)}
+                            onDrop={(event) => void dropSort('subitem', subItem.id, event)}
+                            onDragEnd={() => setDragState(null)}
+                          >
+                            <header className="subitem-header">
+                              <button
+                                type="button"
+                                className="subitem-select"
+                                onClick={() => openSubItemBodyPage(subItem)}
+                              >
+                                {subItem.title}
+                              </button>
+                              <div className="subitem-actions">
+                                <button
+                                  type="button"
+                                  className="danger-button mini-action"
+                                  onClick={() =>
+                                    openConfirmDialog({
+                                      title: '項目内項目の削除',
+                                      message: `「${subItem.title}」を削除します。`,
+                                      confirmLabel: '削除する',
+                                      onConfirm: async () => {
+                                        await deleteSubItem(subItem)
+                                      },
+                                    })
+                                  }
+                                >
+                                  削除
+                                </button>
+                              </div>
+                            </header>
+                          </article>
+                        ))
+                      )
+                    ) : (
+                      <p className="subtle">項目を選択するとここにデータが表示されます</p>
+                    )}
+                  </div>
+                </section>
+
+                <section className="main-section">
+                  <h3>日付</h3>
+                  <input
+                    type="date"
+                    value={mainScheduledOn}
+                    onChange={(event) => void handleMainDateChange(event.target.value)}
+                    disabled={!selectedItemId}
+                  />
+                </section>
+
+                <section className="main-section">
+                  <h3>項目タグ</h3>
+                  <p className="subtle">選択中タグを再クリックすると、タグ設定ウインドウを開きます。</p>
+                  <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
+                    ＋ タグを作成
+                  </button>
+                  <div className="tag-picker">
+                    {tagPresets.length === 0 ? (
+                      <p className="subtle">タグがありません。上のボタンで作成してください</p>
+                    ) : (
+                      tagPresets.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          className={`ghost-button tag-preset-button ${
+                            mainSelectedTags.includes(tag.name) ? 'active' : ''
+                          } ${dragState?.kind === 'tag' && dragState.id === tag.id ? 'dragging' : ''}`}
+                          onClick={() => void handleMainTagButton(tag)}
+                          disabled={!selectedItemId}
+                          draggable
+                          onDragStart={(event) => startSortDrag('tag', tag.id, event)}
+                          onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
+                          onDrop={(event) => void dropSort('tag', tag.id, event)}
+                          onDragEnd={() => setDragState(null)}
+                        >
+                          {tag.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {mainSelectedTags.length > 0 && (
+                    <div className="selected-tag-list">
+                      {mainSelectedTags.map((tagName) => (
+                        <button
+                          key={tagName}
+                          type="button"
+                          className="selected-tag-chip"
+                          onClick={() => void removeMainTag(tagName)}
+                        >
+                          {tagName} ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="main-section subitem-form">
+                  <h3>項目内項目追加</h3>
+                  <p className="subtle">複数選択して一括追加できます。選択済みを再クリックすると詳細ウインドウを開きます。</p>
+                  <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
+                    ＋ 項目内項目を作成
+                  </button>
+                  <div className="template-button-list">
+                    {subItemTemplates.length === 0 ? (
+                      <p className="subtle">項目内項目がありません。上のボタンで作成してください</p>
+                    ) : (
+                      subItemTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          type="button"
+                          className={`ghost-button template-button ${
+                            mainSelectedTemplateIds.includes(template.id) ? 'active' : ''
+                          } ${dragState?.kind === 'template' && dragState.id === template.id ? 'dragging' : ''}`}
+                          onClick={() => void handleMainTemplateButton(template)}
+                          disabled={!selectedItemId}
+                          draggable
+                          onDragStart={(event) => startSortDrag('template', template.id, event)}
+                          onDragOver={(event) => allowSortDrop('template', template.id, event)}
+                          onDrop={(event) => void dropSort('template', template.id, event)}
+                          onDragEnd={() => setDragState(null)}
+                        >
+                          {template.title}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {mainSelectedTemplateIds.length > 0 && (
+                    <div className="selected-template-list">
+                      {mainSelectedTemplateIds.map((templateId) => {
+                        const templateName =
+                          subItemTemplates.find((template) => template.id === templateId)?.title ?? templateId
+                        return (
+                          <button
+                            key={templateId}
+                            type="button"
+                            className="selected-template-chip"
+                            onClick={() => removeMainTemplateSelection(templateId)}
+                          >
+                            {templateName} ×
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addSelectedTemplatesToItem}
+                    disabled={!selectedItemId || mainSelectedTemplateIds.length === 0}
+                  >
+                    選択した項目内項目を追加
+                  </button>
+                </section>
+              </>
+            )}
           </section>
         )}
       </section>
