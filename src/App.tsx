@@ -189,6 +189,7 @@ function App() {
       .from('nodes')
       .select('id, title, scheduled_on, tags, sort_order, created_at')
       .is('parent_id', null)
+      .order('scheduled_on', { ascending: true, nullsFirst: false })
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
