@@ -235,47 +235,11 @@
   color: #155f8d;
 }
 
-.tag-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.45rem;
-  align-items: center;
-}
-
 .main-create-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.45rem;
   align-items: center;
-}
-
-.preset-list {
-  min-height: 0;
-  max-height: 18rem;
-  overflow: auto;
-  border: 1px solid #e1e8ee;
-  border-radius: 8px;
-  padding: 0.45rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.preset-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border: 1px solid #d8e1e8;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 0.35rem 0.45rem;
-}
-
-.preset-name {
-  font-size: 0.9rem;
-  color: #22313f;
-  line-height: 1.2;
 }
 
 .settings-template-actions {
@@ -404,7 +368,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .tag-create-row,
   .item-create-row,
   .main-create-row {
     grid-template-columns: 1fr;

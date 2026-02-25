@@ -52,12 +52,13 @@ function App() {
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
+  const [selectedSettingsTagId, setSelectedSettingsTagId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
 
   const [settingsTemplateTitle, setSettingsTemplateTitle] = useState('')
-  const [settingsNewTagName, setSettingsNewTagName] = useState('')
+  const [settingsTagName, setSettingsTagName] = useState('')
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainTemplateTitle, setMainTemplateTitle] = useState('')
@@ -66,6 +67,7 @@ function App() {
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSettingsTemplate =
     subItemTemplates.find((template) => template.id === selectedSettingsTemplateId) ?? null
+  const selectedSettingsTag = tagPresets.find((tag) => tag.id === selectedSettingsTagId) ?? null
 
   useEffect(() => {
     setRenameItemTitle(selectedItem?.title ?? '')
@@ -78,6 +80,14 @@ function App() {
     }
     setSettingsTemplateTitle(selectedSettingsTemplate.title)
   }, [selectedSettingsTemplate?.id])
+
+  useEffect(() => {
+    if (!selectedSettingsTag) {
+      setSettingsTagName('')
+      return
+    }
+    setSettingsTagName(selectedSettingsTag.name)
+  }, [selectedSettingsTag?.id])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -202,7 +212,12 @@ function App() {
       return
     }
 
-    setTagPresets((data ?? []) as TagPresetRow[])
+    const loadedTags = (data ?? []) as TagPresetRow[]
+    setTagPresets(loadedTags)
+    setSelectedSettingsTagId((current) => {
+      if (current && loadedTags.some((tag) => tag.id === current)) return current
+      return loadedTags[0]?.id ?? null
+    })
   }
 
   useEffect(() => {
@@ -213,6 +228,7 @@ function App() {
       setTagPresets([])
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
+      setSelectedSettingsTagId(null)
       return
     }
     void loadItems()
@@ -324,25 +340,28 @@ function App() {
     )
   }
 
-  const addTagPresetFromSettings = async () => {
+  const createTagPresetFromSettings = async () => {
     setError('')
-    const trimmed = settingsNewTagName.trim()
+    const trimmed = settingsTagName.trim()
     if (!trimmed) {
       setError('追加するタグ名を入力してください。')
       return
     }
 
-    const { error: insertError } = await supabase
+    const { data, error: insertError } = await supabase
       .from('subitem_tag_presets')
-      .upsert({ name: trimmed }, { onConflict: 'name', ignoreDuplicates: true })
+      .upsert({ name: trimmed }, { onConflict: 'name' })
+      .select('id')
+      .single()
 
     if (insertError) {
       setError(insertError.message)
       return
     }
 
-    setSettingsNewTagName('')
+    setSettingsTagName('')
     await loadTagPresets()
+    if (data?.id) setSelectedSettingsTagId(data.id)
   }
 
   const addTagPresetFromMain = async () => {
@@ -366,19 +385,53 @@ function App() {
     await loadTagPresets()
   }
 
-  const deleteTagPreset = async (tag: TagPresetRow) => {
+  const updateSelectedTagFromSettings = async () => {
     setError('')
-    const confirmed = window.confirm(`タグ「${tag.name}」を削除しますか？`)
+
+    if (!selectedSettingsTagId) {
+      setError('更新するタグを一覧から選択してください。')
+      return
+    }
+    if (!settingsTagName.trim()) {
+      setError('タグ名を入力してください。')
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('subitem_tag_presets')
+      .update({ name: settingsTagName.trim() })
+      .eq('id', selectedSettingsTagId)
+
+    if (updateError) {
+      setError(updateError.message)
+      return
+    }
+
+    await loadTagPresets()
+  }
+
+  const deleteSelectedTagFromSettings = async () => {
+    setError('')
+
+    if (!selectedSettingsTag) {
+      setError('削除するタグを一覧から選択してください。')
+      return
+    }
+
+    const confirmed = window.confirm(`タグ「${selectedSettingsTag.name}」を削除しますか？`)
     if (!confirmed) return
 
-    const { error: deleteError } = await supabase.from('subitem_tag_presets').delete().eq('id', tag.id)
+    const { error: deleteError } = await supabase
+      .from('subitem_tag_presets')
+      .delete()
+      .eq('id', selectedSettingsTag.id)
     if (deleteError) {
       setError(deleteError.message)
       return
     }
 
     await loadTagPresets()
-    setMainSelectedTags((current) => current.filter((name) => name !== tag.name))
+    setMainSelectedTags((current) => current.filter((name) => name !== selectedSettingsTag.name))
   }
 
   const createTemplateFromSettings = async () => {
@@ -732,32 +785,51 @@ function App() {
 
             <section className="settings-section">
               <h3>項目タグ設定</h3>
-              <div className="preset-list">
+              <div className="template-button-list">
                 {tagPresets.length === 0 ? (
                   <p className="subtle">タグはまだありません</p>
                 ) : (
                   tagPresets.map((tag) => (
-                    <div key={tag.id} className="preset-item">
-                      <span className="preset-name">{tag.name}</span>
-                      <button
-                        type="button"
-                        className="danger-button mini-action"
-                        onClick={() => void deleteTagPreset(tag)}
-                      >
-                        削除
-                      </button>
-                    </div>
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`ghost-button template-button ${
+                        selectedSettingsTagId === tag.id ? 'active' : ''
+                      }`}
+                      onClick={() => setSelectedSettingsTagId(tag.id)}
+                    >
+                      {tag.name}
+                    </button>
                   ))
                 )}
               </div>
-              <div className="tag-create-row">
+              <label>
+                項目タグ名
                 <input
-                  value={settingsNewTagName}
-                  onChange={(event) => setSettingsNewTagName(event.target.value)}
-                  placeholder="新しいタグ名"
+                  value={settingsTagName}
+                  onChange={(event) => setSettingsTagName(event.target.value)}
+                  placeholder="例: 感動"
                 />
-                <button type="button" onClick={addTagPresetFromSettings}>
+              </label>
+              <div className="settings-template-actions">
+                <button type="button" onClick={createTagPresetFromSettings}>
                   タグ追加
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={updateSelectedTagFromSettings}
+                  disabled={!selectedSettingsTagId}
+                >
+                  選択更新
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  onClick={deleteSelectedTagFromSettings}
+                  disabled={!selectedSettingsTagId}
+                >
+                  選択削除
                 </button>
               </div>
             </section>
