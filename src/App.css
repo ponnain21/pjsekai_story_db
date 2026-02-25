@@ -193,11 +193,27 @@
   gap: 0.4rem;
 }
 
-.template-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+.template-actions {
+  display: flex;
   gap: 0.4rem;
-  align-items: center;
+}
+
+.template-button-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.template-button {
+  border-color: #c6d2dc;
+  background: #ffffff;
+  color: #304455;
+}
+
+.template-button.active {
+  border-color: #1f8bc7;
+  background: #e7f5ff;
+  color: #155f8d;
 }
 
 .stack-form {
@@ -334,7 +350,4 @@ button:disabled {
     max-height: none;
   }
 
-  .template-row {
-    grid-template-columns: 1fr;
-  }
 }

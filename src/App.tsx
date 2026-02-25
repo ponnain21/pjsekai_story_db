@@ -50,7 +50,7 @@ function App() {
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
-  const [selectedTemplateId, setSelectedTemplateId] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
@@ -186,7 +186,7 @@ function App() {
       setSubItems([])
       setSubItemTemplates([])
       setSelectedItemId(null)
-      setSelectedTemplateId('')
+      setSelectedTemplateId(null)
       return
     }
     void loadItems()
@@ -290,19 +290,7 @@ function App() {
     await loadItems()
   }
 
-  const applySelectedTemplateToForm = () => {
-    setError('')
-    if (!selectedTemplateId) {
-      setError('先にテンプレートを選択してください。')
-      return
-    }
-
-    const template = subItemTemplates.find((item) => item.id === selectedTemplateId)
-    if (!template) {
-      setError('選択したテンプレートが見つかりませんでした。')
-      return
-    }
-
+  const applyTemplateToForm = (template: SubItemTemplateRow) => {
     setSubItemTitle(template.title)
     setSubItemDate(template.scheduled_on ?? '')
     setSubItemTagsInput((template.tags ?? []).join(', '))
@@ -623,24 +611,29 @@ function App() {
 
             <div className="template-tools">
               <p className="subtle">使い回しテンプレート</p>
-              <div className="template-row">
-                <select
-                  value={selectedTemplateId}
-                  onChange={(event) => setSelectedTemplateId(event.target.value)}
-                >
-                  <option value="">テンプレートを選択</option>
-                  {subItemTemplates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.title}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="ghost-button" onClick={applySelectedTemplateToForm}>
-                  読み込み
-                </button>
+              <div className="template-actions">
                 <button type="button" className="ghost-button" onClick={saveCurrentFormAsTemplate}>
                   現在入力を保存
                 </button>
+              </div>
+              <div className="template-button-list">
+                {subItemTemplates.length === 0 ? (
+                  <p className="subtle">テンプレートはまだありません</p>
+                ) : (
+                  subItemTemplates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className={`ghost-button template-button ${selectedTemplateId === template.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedTemplateId(template.id)
+                        applyTemplateToForm(template)
+                      }}
+                    >
+                      {template.title}
+                    </button>
+                  ))
+                )}
               </div>
             </div>
 
