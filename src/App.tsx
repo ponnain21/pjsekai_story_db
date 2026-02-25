@@ -75,6 +75,7 @@ function App() {
 
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
+  const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
@@ -234,7 +235,7 @@ function App() {
     setSubItemTemplates(loadedTemplates)
     setSelectedSettingsTemplateId((current) => {
       if (current && loadedTemplates.some((template) => template.id === current)) return current
-      return loadedTemplates[0]?.id ?? null
+      return null
     })
   }
 
@@ -253,7 +254,7 @@ function App() {
     setTagPresets(loadedTags)
     setSelectedSettingsTagId((current) => {
       if (current && loadedTags.some((tag) => tag.id === current)) return current
-      return loadedTags[0]?.id ?? null
+      return null
     })
   }
 
@@ -278,6 +279,7 @@ function App() {
     if (!selectedItemId) {
       setSubItems([])
       setSelectedSubItemId(null)
+      setMainSelectedTemplateIds([])
       return
     }
     void loadSubItems(selectedItemId)
@@ -566,13 +568,59 @@ function App() {
     setSelectedSettingsTemplateId(template.id)
   }
 
-  const handleMainTemplateButton = async (template: SubItemTemplateRow) => {
-    if (selectedSettingsTemplateId === template.id) {
+  const handleMainTemplateButton = (template: SubItemTemplateRow) => {
+    if (mainSelectedTemplateIds.includes(template.id)) {
       openEditPresetDialog('template', template.id)
       return
     }
     setSelectedSettingsTemplateId(template.id)
-    await addSubItemFromTemplate(template)
+    setMainSelectedTemplateIds((current) => uniqueStrings([...current, template.id]))
+  }
+
+  const removeMainTemplateSelection = (templateId: string) => {
+    setMainSelectedTemplateIds((current) => current.filter((id) => id !== templateId))
+  }
+
+  const addSelectedTemplatesToItem = async () => {
+    setError('')
+
+    if (!selectedItemId) {
+      setError('先に親項目を選択してください。')
+      return
+    }
+    if (mainSelectedTemplateIds.length === 0) {
+      setError('追加する項目内項目を選択してください。')
+      return
+    }
+
+    const selectedTemplates = mainSelectedTemplateIds
+      .map((templateId) => subItemTemplates.find((template) => template.id === templateId))
+      .filter((template): template is SubItemTemplateRow => Boolean(template))
+
+    if (selectedTemplates.length === 0) {
+      setError('選択中の項目内項目が見つかりません。')
+      return
+    }
+
+    const baseSortOrder =
+      subItems.length === 0 ? 0 : Math.max(...subItems.map((subItem) => subItem.sort_order)) + 1
+    const payload = selectedTemplates.map((template, index) => ({
+      node_id: selectedItemId,
+      title: template.title,
+      scheduled_on: null,
+      tags: [],
+      body: '',
+      sort_order: baseSortOrder + index,
+    }))
+
+    const { error: insertError } = await supabase.from('threads').insert(payload)
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    setMainSelectedTemplateIds([])
+    await loadSubItems(selectedItemId)
   }
 
   const removeMainTag = async (name: string) => {
@@ -603,34 +651,6 @@ function App() {
     setMainSelectedTags(nextTags)
     setSelectedSettingsTagId(tag.id)
     await saveItemMeta(mainScheduledOn, nextTags)
-  }
-
-  const addSubItemFromTemplate = async (template: SubItemTemplateRow) => {
-    setError('')
-
-    if (!selectedItemId) {
-      setError('先に親項目を選択してください。')
-      return
-    }
-
-    const nextSortOrder =
-      subItems.length === 0 ? 0 : Math.max(...subItems.map((subItem) => subItem.sort_order)) + 1
-
-    const { error: insertError } = await supabase.from('threads').insert({
-      node_id: selectedItemId,
-      title: template.title,
-      scheduled_on: null,
-      tags: [],
-      body: '',
-      sort_order: nextSortOrder,
-    })
-
-    if (insertError) {
-      setError(insertError.message)
-      return
-    }
-
-    await loadSubItems(selectedItemId)
   }
 
   const moveSubItem = async (subItemId: string, direction: 'up' | 'down') => {
@@ -1030,7 +1050,7 @@ function App() {
 
             <section className="main-section subitem-form">
               <h3>項目内項目追加</h3>
-              <p className="subtle">同じテンプレートを続けて押すと詳細ウインドウを開きます。</p>
+              <p className="subtle">複数選択して一括追加できます。選択済みを再クリックすると詳細ウインドウを開きます。</p>
               <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
                 ＋ 項目内項目を作成
               </button>
@@ -1043,7 +1063,7 @@ function App() {
                       key={template.id}
                       type="button"
                       className={`ghost-button template-button ${
-                        selectedSettingsTemplateId === template.id ? 'active' : ''
+                        mainSelectedTemplateIds.includes(template.id) ? 'active' : ''
                       }`}
                       onClick={() => void handleMainTemplateButton(template)}
                       disabled={!selectedItemId}
@@ -1053,6 +1073,30 @@ function App() {
                   ))
                 )}
               </div>
+              {mainSelectedTemplateIds.length > 0 && (
+                <div className="selected-template-list">
+                  {mainSelectedTemplateIds.map((templateId) => {
+                    const templateName = subItemTemplates.find((template) => template.id === templateId)?.title ?? templateId
+                    return (
+                      <button
+                        key={templateId}
+                        type="button"
+                        className="selected-template-chip"
+                        onClick={() => removeMainTemplateSelection(templateId)}
+                      >
+                        {templateName} ×
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={addSelectedTemplatesToItem}
+                disabled={!selectedItemId || mainSelectedTemplateIds.length === 0}
+              >
+                選択した項目内項目を追加
+              </button>
             </section>
           </section>
         )}
@@ -1070,7 +1114,7 @@ function App() {
                   ? 'タグを作成'
                   : 'タグの詳細設定'}
             </h2>
-            <label>
+            <label className="dialog-field">
               名称
               <input
                 value={presetNameDraft}
