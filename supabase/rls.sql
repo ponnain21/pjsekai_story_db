@@ -6,6 +6,7 @@ alter table if exists public.nodes enable row level security;
 alter table if exists public.threads enable row level security;
 alter table if exists public.entries enable row level security;
 alter table if exists public.subitem_templates enable row level security;
+alter table if exists public.subitem_tag_presets enable row level security;
 
 drop policy if exists "allowed_users_select_self" on public.allowed_users;
 create policy "allowed_users_select_self"
@@ -230,6 +231,61 @@ with check (
 drop policy if exists "subitem_templates_delete_allowlisted" on public.subitem_templates;
 create policy "subitem_templates_delete_allowlisted"
 on public.subitem_templates for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_tag_presets_select_allowlisted" on public.subitem_tag_presets;
+create policy "subitem_tag_presets_select_allowlisted"
+on public.subitem_tag_presets for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_tag_presets_insert_allowlisted" on public.subitem_tag_presets;
+create policy "subitem_tag_presets_insert_allowlisted"
+on public.subitem_tag_presets for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_tag_presets_update_allowlisted" on public.subitem_tag_presets;
+create policy "subitem_tag_presets_update_allowlisted"
+on public.subitem_tag_presets for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_tag_presets_delete_allowlisted" on public.subitem_tag_presets;
+create policy "subitem_tag_presets_delete_allowlisted"
+on public.subitem_tag_presets for delete
 to authenticated
 using (
   exists (

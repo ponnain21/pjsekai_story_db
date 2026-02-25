@@ -45,6 +45,12 @@ create table if not exists public.subitem_templates (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.subitem_tag_presets (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.entries (
   id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references public.threads (id) on delete cascade,

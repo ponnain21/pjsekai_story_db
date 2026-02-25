@@ -135,7 +135,6 @@
   border-radius: 10px;
   padding: 0.6rem 0.7rem;
   background: #ffffff;
-  cursor: pointer;
 }
 
 .subitem-header {
@@ -173,29 +172,8 @@
   padding: 0.15rem 0.5rem;
 }
 
-.subitem-body {
-  margin: 0;
-  white-space: pre-wrap;
-  line-height: 1.45;
-}
-
 .subitem-form {
   margin-top: auto;
-}
-
-.template-tools {
-  border: 1px solid #e1e8ee;
-  border-radius: 10px;
-  padding: 0.5rem;
-  background: #f9fcfe;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.template-actions {
-  display: flex;
-  gap: 0.4rem;
 }
 
 .template-button-list {
@@ -214,6 +192,57 @@
   border-color: #1f8bc7;
   background: #e7f5ff;
   color: #155f8d;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-section {
+  border: 1px solid #e1e8ee;
+  border-radius: 10px;
+  padding: 0.55rem;
+  background: #f9fcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tag-preset-button {
+  border-color: #c6d2dc;
+  background: #ffffff;
+  color: #304455;
+}
+
+.tag-preset-button.active {
+  border-color: #1f8bc7;
+  background: #e7f5ff;
+  color: #155f8d;
+}
+
+.tag-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.settings-template-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.settings-footer {
+  margin-top: auto;
 }
 
 .stack-form {
@@ -239,23 +268,6 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.settings-box {
-  border: 1px solid #e1e8ee;
-  border-radius: 10px;
-  padding: 0.55rem;
-  background: #f9fcfe;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.settings-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
 }
 
 .item-action-row {
@@ -321,11 +333,6 @@ button {
   padding: 0.2rem 0.45rem;
 }
 
-.close-mini {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.45rem;
-}
-
 .settings-logout {
   width: 100%;
 }
@@ -350,4 +357,12 @@ button:disabled {
     max-height: none;
   }
 
+  .settings-template-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .tag-create-row,
+  .item-create-row {
+    grid-template-columns: 1fr;
+  }
 }

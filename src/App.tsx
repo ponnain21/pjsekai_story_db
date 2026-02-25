@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -30,11 +30,13 @@ type SubItemTemplateRow = {
   created_at: string
 }
 
-const parseTags = (value: string) =>
-  value
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter((tag) => tag.length > 0)
+type TagPresetRow = {
+  id: string
+  name: string
+  created_at: string
+}
+
+const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -43,26 +45,50 @@ function App() {
   )
   const [authLoading, setAuthLoading] = useState(false)
   const [error, setError] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const [pageMode, setPageMode] = useState<'main' | 'settings'>('main')
 
   const [items, setItems] = useState<ItemRow[]>([])
   const [subItems, setSubItems] = useState<SubItemRow[]>([])
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
+  const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
-  const [subItemTitle, setSubItemTitle] = useState('')
-  const [subItemDate, setSubItemDate] = useState('')
-  const [subItemTagsInput, setSubItemTagsInput] = useState('')
+
+  const [settingsTemplateTitle, setSettingsTemplateTitle] = useState('')
+  const [settingsTemplateDate, setSettingsTemplateDate] = useState('')
+  const [settingsSelectedTags, setSettingsSelectedTags] = useState<string[]>([])
+  const [newTagName, setNewTagName] = useState('')
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
+  const selectedSettingsTemplate =
+    subItemTemplates.find((template) => template.id === selectedSettingsTemplateId) ?? null
+
+  const allTemplateTags = useMemo(() => {
+    const fromTemplates = subItemTemplates.flatMap((template) => template.tags ?? [])
+    const fromPresets = tagPresets.map((tag) => tag.name)
+    return uniqueStrings([...fromPresets, ...fromTemplates])
+  }, [subItemTemplates, tagPresets])
 
   useEffect(() => {
     setRenameItemTitle(selectedItem?.title ?? '')
   }, [selectedItem?.id, selectedItem?.title])
+
+  useEffect(() => {
+    if (!selectedSettingsTemplate) {
+      setSettingsTemplateTitle('')
+      setSettingsTemplateDate('')
+      setSettingsSelectedTags([])
+      return
+    }
+    setSettingsTemplateTitle(selectedSettingsTemplate.title)
+    setSettingsTemplateDate(selectedSettingsTemplate.scheduled_on ?? '')
+    setSettingsSelectedTags(uniqueStrings(selectedSettingsTemplate.tags ?? []))
+  }, [selectedSettingsTemplate?.id])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -105,21 +131,18 @@ function App() {
         .maybeSingle()
 
       if (!active) return
-
       if (verifyError) {
         setError(verifyError.message)
         setAccessStatus('denied')
         await supabase.auth.signOut()
         return
       }
-
       if (!data) {
         setError('このGoogleアカウントは許可されていません。')
         setAccessStatus('denied')
         await supabase.auth.signOut()
         return
       }
-
       setAccessStatus('allowed')
     }
 
@@ -162,8 +185,7 @@ function App() {
       return
     }
 
-    const loadedSubItems = (data ?? []) as SubItemRow[]
-    setSubItems(loadedSubItems)
+    setSubItems((data ?? []) as SubItemRow[])
   }
 
   const loadSubItemTemplates = async () => {
@@ -180,17 +202,33 @@ function App() {
     setSubItemTemplates((data ?? []) as SubItemTemplateRow[])
   }
 
+  const loadTagPresets = async () => {
+    const { data, error: loadError } = await supabase
+      .from('subitem_tag_presets')
+      .select('id, name, created_at')
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      setError(loadError.message)
+      return
+    }
+
+    setTagPresets((data ?? []) as TagPresetRow[])
+  }
+
   useEffect(() => {
     if (!session || accessStatus !== 'allowed') {
       setItems([])
       setSubItems([])
       setSubItemTemplates([])
+      setTagPresets([])
       setSelectedItemId(null)
-      setSelectedTemplateId(null)
+      setSelectedSettingsTemplateId(null)
       return
     }
     void loadItems()
     void loadSubItemTemplates()
+    void loadTagPresets()
   }, [session, accessStatus])
 
   useEffect(() => {
@@ -216,7 +254,6 @@ function App() {
 
   const logout = async () => {
     setError('')
-    setSettingsOpen(false)
     const { error: signOutError } = await supabase.auth.signOut()
     if (signOutError) setError(signOutError.message)
   }
@@ -290,28 +327,48 @@ function App() {
     await loadItems()
   }
 
-  const applyTemplateToForm = (template: SubItemTemplateRow) => {
-    setSubItemTitle(template.title)
-    setSubItemDate(template.scheduled_on ?? '')
-    setSubItemTagsInput((template.tags ?? []).join(', '))
+  const toggleSettingTag = (name: string) => {
+    setSettingsSelectedTags((current) =>
+      current.includes(name) ? current.filter((tag) => tag !== name) : [...current, name],
+    )
   }
 
-  const saveCurrentFormAsTemplate = async () => {
+  const addTagPreset = async () => {
     setError('')
-
-    if (!subItemTitle.trim()) {
-      setError('テンプレート保存には項目内項目名が必要です。')
+    const trimmed = newTagName.trim()
+    if (!trimmed) {
+      setError('追加するタグ名を入力してください。')
       return
     }
 
-    const tags = parseTags(subItemTagsInput)
+    const { error: insertError } = await supabase
+      .from('subitem_tag_presets')
+      .upsert({ name: trimmed }, { onConflict: 'name', ignoreDuplicates: true })
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    setNewTagName('')
+    await loadTagPresets()
+    setSettingsSelectedTags((current) => uniqueStrings([...current, trimmed]))
+  }
+
+  const createTemplateFromSettings = async () => {
+    setError('')
+
+    if (!settingsTemplateTitle.trim()) {
+      setError('項目内項目名を入力してください。')
+      return
+    }
 
     const { data, error: insertError } = await supabase
       .from('subitem_templates')
       .insert({
-        title: subItemTitle.trim(),
-        scheduled_on: subItemDate || null,
-        tags,
+        title: settingsTemplateTitle.trim(),
+        scheduled_on: settingsTemplateDate || null,
+        tags: uniqueStrings(settingsSelectedTags),
         body: '',
       })
       .select('id')
@@ -323,31 +380,79 @@ function App() {
     }
 
     await loadSubItemTemplates()
-    if (data?.id) setSelectedTemplateId(data.id)
+    if (data?.id) setSelectedSettingsTemplateId(data.id)
   }
 
-  const submitSubItem = async (event: FormEvent) => {
-    event.preventDefault()
+  const updateSelectedTemplate = async () => {
+    setError('')
+
+    if (!selectedSettingsTemplateId) {
+      setError('更新する項目内項目を一覧から選択してください。')
+      return
+    }
+    if (!settingsTemplateTitle.trim()) {
+      setError('項目内項目名を入力してください。')
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('subitem_templates')
+      .update({
+        title: settingsTemplateTitle.trim(),
+        scheduled_on: settingsTemplateDate || null,
+        tags: uniqueStrings(settingsSelectedTags),
+      })
+      .eq('id', selectedSettingsTemplateId)
+
+    if (updateError) {
+      setError(updateError.message)
+      return
+    }
+
+    await loadSubItemTemplates()
+  }
+
+  const deleteSelectedTemplate = async () => {
+    setError('')
+
+    if (!selectedSettingsTemplate) {
+      setError('削除する項目内項目を一覧から選択してください。')
+      return
+    }
+
+    const confirmed = window.confirm(`項目内項目「${selectedSettingsTemplate.title}」を削除しますか？`)
+    if (!confirmed) return
+
+    const { error: deleteError } = await supabase
+      .from('subitem_templates')
+      .delete()
+      .eq('id', selectedSettingsTemplate.id)
+
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    setSelectedSettingsTemplateId(null)
+    await loadSubItemTemplates()
+  }
+
+  const addSubItemFromTemplate = async (template: SubItemTemplateRow) => {
     setError('')
 
     if (!selectedItemId) {
       setError('先に親項目を選択してください。')
       return
     }
-    if (!subItemTitle.trim()) {
-      setError('項目内項目名は必須です。')
-      return
-    }
 
-    const tags = parseTags(subItemTagsInput)
     const nextSortOrder =
       subItems.length === 0 ? 0 : Math.max(...subItems.map((subItem) => subItem.sort_order)) + 1
 
     const { error: insertError } = await supabase.from('threads').insert({
       node_id: selectedItemId,
-      title: subItemTitle.trim(),
-      scheduled_on: subItemDate || null,
-      tags,
+      title: template.title,
+      scheduled_on: template.scheduled_on,
+      tags: template.tags ?? [],
       body: '',
       sort_order: nextSortOrder,
     })
@@ -357,14 +462,12 @@ function App() {
       return
     }
 
-    setSubItemTitle('')
-    setSubItemDate('')
-    setSubItemTagsInput('')
     await loadSubItems(selectedItemId)
   }
 
   const moveSubItem = async (subItemId: string, direction: 'up' | 'down') => {
     if (!selectedItemId) return
+
     const currentIndex = subItems.findIndex((subItem) => subItem.id === subItemId)
     if (currentIndex < 0) return
 
@@ -459,28 +562,11 @@ function App() {
             <button
               type="button"
               className="ghost-button logout-mini"
-              onClick={() => setSettingsOpen((current) => !current)}
+              onClick={() => setPageMode((current) => (current === 'main' ? 'settings' : 'main'))}
             >
-              設定
+              {pageMode === 'main' ? '設定' : '戻る'}
             </button>
           </div>
-          {settingsOpen && (
-            <section className="settings-box">
-              <div className="settings-head">
-                <p className="subtle">設定メニュー</p>
-                <button
-                  type="button"
-                  className="ghost-button close-mini"
-                  onClick={() => setSettingsOpen(false)}
-                >
-                  閉じる
-                </button>
-              </div>
-              <button type="button" className="danger-button settings-logout" onClick={logout}>
-                ログアウト
-              </button>
-            </section>
-          )}
 
           <form className="stack-form item-create-form" onSubmit={submitItem}>
             <label className="sr-only" htmlFor="new-item-title">
@@ -541,132 +627,197 @@ function App() {
           </form>
         </aside>
 
-        <section className="panel content-panel">
-          <div className="content-head">
-            <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
-            <p className="subtle">
-              {selectedItem
-                ? '項目内項目を使い回し・並べ替え・削除できます。'
-                : '左の一覧から項目を選ぶか、新しく作成してください。'}
-            </p>
-          </div>
+        {pageMode === 'settings' ? (
+          <section className="panel content-panel settings-page">
+            <h2>設定</h2>
 
-          <div className="subitem-list">
-            {selectedItemId ? (
-              subItems.length === 0 ? (
-                <p className="subtle">まだ項目内項目がありません</p>
-              ) : (
-                subItems.map((subItem, index) => (
-                  <article key={subItem.id} className="subitem-card">
-                    <header className="subitem-header">
-                      <div>
-                        <h3>{subItem.title}</h3>
-                        <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
-                      </div>
-                      <div className="subitem-actions">
-                        <button
-                          type="button"
-                          className="ghost-button mini-action"
-                          onClick={() => void moveSubItem(subItem.id, 'up')}
-                          disabled={index === 0}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button mini-action"
-                          onClick={() => void moveSubItem(subItem.id, 'down')}
-                          disabled={index === subItems.length - 1}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          className="danger-button mini-action"
-                          onClick={() => void deleteSubItem(subItem)}
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </header>
-                    {subItem.tags && subItem.tags.length > 0 && (
-                      <div className="tag-list">
-                        {subItem.tags.map((tag) => (
-                          <span key={`${subItem.id}-${tag}`} className="tag-chip">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))
-              )
-            ) : (
-              <p className="subtle">項目を選択するとここにデータが表示されます</p>
-            )}
-          </div>
-
-          <form className="stack-form subitem-form" onSubmit={submitSubItem}>
-            <h3>項目内項目を追加</h3>
-
-            <div className="template-tools">
-              <p className="subtle">使い回しテンプレート</p>
-              <div className="template-actions">
-                <button type="button" className="ghost-button" onClick={saveCurrentFormAsTemplate}>
-                  現在入力を保存
-                </button>
-              </div>
+            <section className="settings-section">
+              <h3>項目内項目一覧</h3>
               <div className="template-button-list">
                 {subItemTemplates.length === 0 ? (
-                  <p className="subtle">テンプレートはまだありません</p>
+                  <p className="subtle">項目内項目はまだありません</p>
                 ) : (
                   subItemTemplates.map((template) => (
                     <button
                       key={template.id}
                       type="button"
-                      className={`ghost-button template-button ${selectedTemplateId === template.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setSelectedTemplateId(template.id)
-                        applyTemplateToForm(template)
-                      }}
+                      className={`ghost-button template-button ${
+                        selectedSettingsTemplateId === template.id ? 'active' : ''
+                      }`}
+                      onClick={() => setSelectedSettingsTemplateId(template.id)}
                     >
                       {template.title}
                     </button>
                   ))
                 )}
               </div>
-            </div>
+              <label>
+                項目内項目名
+                <input
+                  value={settingsTemplateTitle}
+                  onChange={(event) => setSettingsTemplateTitle(event.target.value)}
+                  placeholder="例: 導入シーン"
+                />
+              </label>
+            </section>
 
-            <label>
-              項目内項目
-              <input
-                value={subItemTitle}
-                onChange={(event) => setSubItemTitle(event.target.value)}
-                placeholder="例: 導入シーン"
-                required
-              />
-            </label>
-            <label>
-              日付
+            <section className="settings-section">
+              <h3>日付</h3>
               <input
                 type="date"
-                value={subItemDate}
-                onChange={(event) => setSubItemDate(event.target.value)}
+                value={settingsTemplateDate}
+                onChange={(event) => setSettingsTemplateDate(event.target.value)}
               />
-            </label>
-            <label>
-              項目タグ付け（カンマ区切り）
-              <input
-                value={subItemTagsInput}
-                onChange={(event) => setSubItemTagsInput(event.target.value)}
-                placeholder="例: 重要, イベント, 修正待ち"
-              />
-            </label>
-            <button type="submit" disabled={!selectedItemId}>
-              項目内項目を追加
-            </button>
-          </form>
-        </section>
+            </section>
+
+            <section className="settings-section">
+              <h3>項目タグ付け</h3>
+              <div className="tag-picker">
+                {allTemplateTags.length === 0 ? (
+                  <p className="subtle">タグはまだありません</p>
+                ) : (
+                  allTemplateTags.map((tagName) => (
+                    <button
+                      key={tagName}
+                      type="button"
+                      className={`ghost-button tag-preset-button ${
+                        settingsSelectedTags.includes(tagName) ? 'active' : ''
+                      }`}
+                      onClick={() => toggleSettingTag(tagName)}
+                    >
+                      {tagName}
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="tag-create-row">
+                <input
+                  value={newTagName}
+                  onChange={(event) => setNewTagName(event.target.value)}
+                  placeholder="新しいタグ名"
+                />
+                <button type="button" onClick={addTagPreset}>
+                  タグ追加
+                </button>
+              </div>
+            </section>
+
+            <div className="settings-template-actions">
+              <button type="button" onClick={createTemplateFromSettings}>
+                項目内項目追加
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={updateSelectedTemplate}
+                disabled={!selectedSettingsTemplateId}
+              >
+                選択更新
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                onClick={deleteSelectedTemplate}
+                disabled={!selectedSettingsTemplateId}
+              >
+                選択削除
+              </button>
+            </div>
+
+            <div className="settings-footer">
+              <button type="button" className="danger-button settings-logout" onClick={logout}>
+                ログアウト
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="panel content-panel">
+            <div className="content-head">
+              <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
+              <p className="subtle">
+                {selectedItem
+                  ? '項目内項目は下のボタンから追加できます。'
+                  : '左の一覧から項目を選ぶか、新しく作成してください。'}
+              </p>
+            </div>
+
+            <div className="subitem-list">
+              {selectedItemId ? (
+                subItems.length === 0 ? (
+                  <p className="subtle">まだ項目内項目がありません</p>
+                ) : (
+                  subItems.map((subItem, index) => (
+                    <article key={subItem.id} className="subitem-card">
+                      <header className="subitem-header">
+                        <div>
+                          <h3>{subItem.title}</h3>
+                          <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
+                        </div>
+                        <div className="subitem-actions">
+                          <button
+                            type="button"
+                            className="ghost-button mini-action"
+                            onClick={() => void moveSubItem(subItem.id, 'up')}
+                            disabled={index === 0}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button mini-action"
+                            onClick={() => void moveSubItem(subItem.id, 'down')}
+                            disabled={index === subItems.length - 1}
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-button mini-action"
+                            onClick={() => void deleteSubItem(subItem)}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </header>
+                      {subItem.tags && subItem.tags.length > 0 && (
+                        <div className="tag-list">
+                          {subItem.tags.map((tag) => (
+                            <span key={`${subItem.id}-${tag}`} className="tag-chip">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))
+                )
+              ) : (
+                <p className="subtle">項目を選択するとここにデータが表示されます</p>
+              )}
+            </div>
+
+            <section className="stack-form subitem-form">
+              <h3>項目内項目を追加</h3>
+              <div className="template-button-list">
+                {subItemTemplates.length === 0 ? (
+                  <p className="subtle">設定ページで項目内項目を先に登録してください</p>
+                ) : (
+                  subItemTemplates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className="ghost-button template-button"
+                      onClick={() => void addSubItemFromTemplate(template)}
+                      disabled={!selectedItemId}
+                    >
+                      {template.title}
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+          </section>
+        )}
       </section>
     </main>
   )
