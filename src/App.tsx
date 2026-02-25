@@ -41,7 +41,7 @@ type TagPresetRow = {
 type SortableKind = 'item' | 'subitem' | 'template' | 'tag'
 
 type PresetDialogState = {
-  kind: 'template' | 'tag'
+  kind: 'item' | 'template' | 'tag'
   mode: 'create' | 'edit'
   id: string | null
 }
@@ -91,7 +91,6 @@ function App() {
   const [selectedSubItemId, setSelectedSubItemId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
-  const [renameItemTitle, setRenameItemTitle] = useState('')
 
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
@@ -105,10 +104,6 @@ function App() {
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
-
-  useEffect(() => {
-    setRenameItemTitle(selectedItem?.title ?? '')
-  }, [selectedItem?.id, selectedItem?.title])
 
   useEffect(() => {
     setMainScheduledOn(selectedItem?.scheduled_on ?? '')
@@ -396,40 +391,15 @@ function App() {
     await loadItems()
   }
 
-  const submitRenameItem = async (event: FormEvent) => {
-    event.preventDefault()
+  const deleteItemById = async (itemId: string) => {
     setError('')
-
-    if (!selectedItemId) {
-      setError('先に名前変更したい項目を選択してください。')
-      return
-    }
-    if (!renameItemTitle.trim()) {
-      setError('変更後の項目名は必須です。')
+    const item = items.find((current) => current.id === itemId)
+    if (!item) {
+      setError('削除対象の項目が見つかりません。')
       return
     }
 
-    const { error: updateError } = await supabase
-      .from('nodes')
-      .update({ title: renameItemTitle.trim() })
-      .eq('id', selectedItemId)
-
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
-
-    await loadItems()
-  }
-
-  const deleteSelectedItem = async () => {
-    setError('')
-    if (!selectedItem) {
-      setError('先に削除したい項目を選択してください。')
-      return
-    }
-
-    const { error: deleteError } = await supabase.from('nodes').delete().eq('id', selectedItem.id)
+    const { error: deleteError } = await supabase.from('nodes').delete().eq('id', item.id)
     if (deleteError) {
       setError(deleteError.message)
       return
@@ -574,7 +544,16 @@ function App() {
     setPresetDialog({ kind, mode: 'create', id: null })
   }
 
-  const openEditPresetDialog = (kind: 'template' | 'tag', id: string) => {
+  const openEditPresetDialog = (kind: 'item' | 'template' | 'tag', id: string) => {
+    if (kind === 'item') {
+      const item = items.find((current) => current.id === id)
+      if (!item) return
+      setSelectedItemId(item.id)
+      setPresetNameDraft(item.title)
+      setPresetDialog({ kind: 'item', mode: 'edit', id: item.id })
+      return
+    }
+
     if (kind === 'template') {
       const template = subItemTemplates.find((current) => current.id === id)
       if (!template) return
@@ -603,7 +582,18 @@ function App() {
 
     setDialogBusy(true)
     try {
-      if (presetDialog.kind === 'template') {
+      if (presetDialog.kind === 'item') {
+        if (!presetDialog.id) {
+          setError('更新する項目が見つかりません。')
+          return
+        }
+        const { error: updateError } = await supabase.from('nodes').update({ title: trimmed }).eq('id', presetDialog.id)
+        if (updateError) {
+          setError(updateError.message)
+          return
+        }
+        await loadItems()
+      } else if (presetDialog.kind === 'template') {
         if (presetDialog.mode === 'create') {
           const nextSortOrder =
             subItemTemplates.length === 0 ? 0 : Math.max(...subItemTemplates.map((template) => template.sort_order)) + 1
@@ -692,6 +682,21 @@ function App() {
   const requestDeleteFromPresetDialog = () => {
     if (!presetDialog || presetDialog.mode !== 'edit' || !presetDialog.id) return
 
+    if (presetDialog.kind === 'item') {
+      const item = items.find((current) => current.id === presetDialog.id)
+      if (!item) return
+      openConfirmDialog({
+        title: '項目の削除',
+        message: `「${item.title}」を削除します。`,
+        confirmLabel: '削除する',
+        onConfirm: async () => {
+          await deleteItemById(item.id)
+          setPresetDialog(null)
+        },
+      })
+      return
+    }
+
     if (presetDialog.kind === 'template') {
       const template = subItemTemplates.find((current) => current.id === presetDialog.id)
       if (!template) return
@@ -739,6 +744,14 @@ function App() {
       return
     }
     setSelectedSettingsTemplateId(template.id)
+  }
+
+  const handleItemButton = (item: ItemRow) => {
+    if (selectedItemId === item.id) {
+      openEditPresetDialog('item', item.id)
+      return
+    }
+    setSelectedItemId(item.id)
   }
 
   const handleMainTemplateButton = (template: SubItemTemplateRow) => {
@@ -938,7 +951,7 @@ function App() {
                   className={`list-item item-list-item ${selectedItemId === item.id ? 'active' : ''} ${
                     dragState?.kind === 'item' && dragState.id === item.id ? 'dragging' : ''
                   }`}
-                  onClick={() => setSelectedItemId(item.id)}
+                  onClick={() => handleItemButton(item)}
                   draggable
                   onDragStart={(event) => startSortDrag('item', item.id, event)}
                   onDragOver={(event) => allowSortDrop('item', item.id, event)}
@@ -950,39 +963,8 @@ function App() {
               ))
             )}
           </div>
+          <p className="subtle">同じ項目をもう一度押すと詳細ウインドウを開きます。</p>
 
-          <form className="stack-form" onSubmit={submitRenameItem}>
-            <label>
-              選択中項目の名前変更
-              <input
-                value={renameItemTitle}
-                onChange={(event) => setRenameItemTitle(event.target.value)}
-                placeholder="変更後の項目名"
-                disabled={!selectedItemId}
-                required
-              />
-            </label>
-            <div className="item-action-row">
-              <button type="submit" disabled={!selectedItemId}>
-                名前変更
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                onClick={() =>
-                  openConfirmDialog({
-                    title: '項目の削除',
-                    message: selectedItem ? `「${selectedItem.title}」を削除します。` : '項目を削除します。',
-                    confirmLabel: '削除する',
-                    onConfirm: deleteSelectedItem,
-                  })
-                }
-                disabled={!selectedItemId}
-              >
-                項目削除
-              </button>
-            </div>
-          </form>
         </aside>
 
         {pageMode === 'settings' ? (
@@ -1262,7 +1244,9 @@ function App() {
         <div className="overlay">
           <form className="dialog-panel" onSubmit={onSubmitPresetDialogForm}>
             <h2>
-              {presetDialog.kind === 'template'
+              {presetDialog.kind === 'item'
+                ? '項目の詳細設定'
+                : presetDialog.kind === 'template'
                 ? presetDialog.mode === 'create'
                   ? '項目内項目を作成'
                   : '項目内項目の詳細設定'
@@ -1271,11 +1255,11 @@ function App() {
                   : 'タグの詳細設定'}
             </h2>
             <label className="dialog-field">
-              名称
+              {presetDialog.kind === 'item' ? '項目名' : '名称'}
               <input
                 value={presetNameDraft}
                 onChange={(event) => setPresetNameDraft(event.target.value)}
-                placeholder="名称を入力"
+                placeholder={presetDialog.kind === 'item' ? '項目名を入力' : '名称を入力'}
                 disabled={dialogBusy}
               />
             </label>
