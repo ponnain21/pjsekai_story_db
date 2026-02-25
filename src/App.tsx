@@ -7,6 +7,8 @@ import './App.css'
 type ItemRow = {
   id: string
   title: string
+  scheduled_on: string | null
+  tags: string[] | null
   created_at: string
 }
 
@@ -53,6 +55,7 @@ function App() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
   const [selectedSettingsTagId, setSelectedSettingsTagId] = useState<string | null>(null)
+  const [selectedSubItemId, setSelectedSubItemId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
   const [renameItemTitle, setRenameItemTitle] = useState('')
@@ -63,11 +66,13 @@ function App() {
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainTemplateTitle, setMainTemplateTitle] = useState('')
   const [mainNewTagName, setMainNewTagName] = useState('')
+  const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSettingsTemplate =
     subItemTemplates.find((template) => template.id === selectedSettingsTemplateId) ?? null
   const selectedSettingsTag = tagPresets.find((tag) => tag.id === selectedSettingsTagId) ?? null
+  const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
 
   useEffect(() => {
     setRenameItemTitle(selectedItem?.title ?? '')
@@ -88,6 +93,15 @@ function App() {
     }
     setSettingsTagName(selectedSettingsTag.name)
   }, [selectedSettingsTag?.id])
+
+  useEffect(() => {
+    setMainScheduledOn(selectedItem?.scheduled_on ?? '')
+    setMainSelectedTags(uniqueStrings(selectedItem?.tags ?? []))
+  }, [selectedItem?.id, selectedItem?.scheduled_on, selectedItem?.tags])
+
+  useEffect(() => {
+    setSubItemBodyDraft(selectedSubItem?.body ?? '')
+  }, [selectedSubItem?.id, selectedSubItem?.body])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -152,23 +166,42 @@ function App() {
   }, [session])
 
   const loadItems = async () => {
+    const applyLoadedItems = (loadedItems: ItemRow[]) => {
+      setItems(loadedItems)
+      setSelectedItemId((current) => {
+        if (current && loadedItems.some((item) => item.id === current)) return current
+        return loadedItems[0]?.id ?? null
+      })
+    }
+
     const { data, error: loadError } = await supabase
       .from('nodes')
-      .select('id, title, created_at')
+      .select('id, title, scheduled_on, tags, created_at')
       .is('parent_id', null)
       .order('created_at', { ascending: true })
 
     if (loadError) {
-      setError(loadError.message)
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('nodes')
+        .select('id, title, created_at')
+        .is('parent_id', null)
+        .order('created_at', { ascending: true })
+
+      if (legacyError) {
+        setError(loadError.message)
+        return
+      }
+
+      const fallbackItems = ((legacyData ?? []) as Omit<ItemRow, 'scheduled_on' | 'tags'>[]).map((item) => ({
+        ...item,
+        scheduled_on: null,
+        tags: [],
+      }))
+      applyLoadedItems(fallbackItems)
       return
     }
 
-    const loadedItems = (data ?? []) as ItemRow[]
-    setItems(loadedItems)
-    setSelectedItemId((current) => {
-      if (current && loadedItems.some((item) => item.id === current)) return current
-      return loadedItems[0]?.id ?? null
-    })
+    applyLoadedItems((data ?? []) as ItemRow[])
   }
 
   const loadSubItems = async (itemId: string) => {
@@ -184,7 +217,12 @@ function App() {
       return
     }
 
-    setSubItems((data ?? []) as SubItemRow[])
+    const loadedSubItems = (data ?? []) as SubItemRow[]
+    setSubItems(loadedSubItems)
+    setSelectedSubItemId((current) => {
+      if (current && loadedSubItems.some((subItem) => subItem.id === current)) return current
+      return loadedSubItems[0]?.id ?? null
+    })
   }
 
   const loadSubItemTemplates = async () => {
@@ -229,6 +267,7 @@ function App() {
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
       setSelectedSettingsTagId(null)
+      setSelectedSubItemId(null)
       return
     }
     void loadItems()
@@ -239,8 +278,7 @@ function App() {
   useEffect(() => {
     if (!selectedItemId) {
       setSubItems([])
-      setMainScheduledOn('')
-      setMainSelectedTags([])
+      setSelectedSubItemId(null)
       return
     }
     void loadSubItems(selectedItemId)
@@ -334,10 +372,40 @@ function App() {
     await loadItems()
   }
 
-  const toggleMainTag = (name: string) => {
-    setMainSelectedTags((current) =>
-      current.includes(name) ? current.filter((tag) => tag !== name) : [...current, name],
-    )
+  const saveItemMeta = async (scheduledOn: string, tags: string[]) => {
+    if (!selectedItemId) return
+
+    const { error: updateError } = await supabase
+      .from('nodes')
+      .update({
+        scheduled_on: scheduledOn || null,
+        tags: uniqueStrings(tags),
+      })
+      .eq('id', selectedItemId)
+
+    if (updateError) {
+      if (updateError.message.includes('scheduled_on') || updateError.message.includes('tags')) {
+        setError('nodes テーブルに scheduled_on / tags 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(updateError.message)
+      }
+      return
+    }
+
+    await loadItems()
+  }
+
+  const handleMainDateChange = async (value: string) => {
+    setMainScheduledOn(value)
+    await saveItemMeta(value, mainSelectedTags)
+  }
+
+  const toggleMainTag = async (name: string) => {
+    const nextTags = mainSelectedTags.includes(name)
+      ? mainSelectedTags.filter((tag) => tag !== name)
+      : [...mainSelectedTags, name]
+    setMainSelectedTags(nextTags)
+    await saveItemMeta(mainScheduledOn, nextTags)
   }
 
   const createTagPresetFromSettings = async () => {
@@ -381,8 +449,11 @@ function App() {
       return
     }
 
+    const nextTags = uniqueStrings([...mainSelectedTags, trimmed])
+    setMainSelectedTags(nextTags)
     setMainNewTagName('')
     await loadTagPresets()
+    await saveItemMeta(mainScheduledOn, nextTags)
   }
 
   const updateSelectedTagFromSettings = async () => {
@@ -431,7 +502,9 @@ function App() {
     }
 
     await loadTagPresets()
-    setMainSelectedTags((current) => current.filter((name) => name !== selectedSettingsTag.name))
+    const nextTags = mainSelectedTags.filter((name) => name !== selectedSettingsTag.name)
+    setMainSelectedTags(nextTags)
+    await saveItemMeta(mainScheduledOn, nextTags)
   }
 
   const createTemplateFromSettings = async () => {
@@ -552,8 +625,8 @@ function App() {
     const { error: insertError } = await supabase.from('threads').insert({
       node_id: selectedItemId,
       title: template.title,
-      scheduled_on: mainScheduledOn || null,
-      tags: uniqueStrings(mainSelectedTags),
+      scheduled_on: null,
+      tags: [],
       body: '',
       sort_order: nextSortOrder,
     })
@@ -609,6 +682,26 @@ function App() {
     const { error: deleteError } = await supabase.from('threads').delete().eq('id', subItem.id)
     if (deleteError) {
       setError(deleteError.message)
+      return
+    }
+
+    if (selectedItemId) await loadSubItems(selectedItemId)
+  }
+
+  const saveSelectedSubItemBody = async () => {
+    setError('')
+    if (!selectedSubItem) {
+      setError('本文を保存する項目内項目を選択してください。')
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({ body: subItemBodyDraft })
+      .eq('id', selectedSubItem.id)
+
+    if (updateError) {
+      setError(updateError.message)
       return
     }
 
@@ -846,7 +939,7 @@ function App() {
               <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
               <p className="subtle">
                 {selectedItem
-                  ? '下の順番で項目内項目の一覧確認と追加ができます。'
+                  ? '構造: 項目内項目 -> 本文、項目 -> 日付/項目タグ'
                   : '左の一覧から項目を選ぶか、新しく作成してください。'}
               </p>
             </div>
@@ -859,12 +952,18 @@ function App() {
                     <p className="subtle">まだ項目内項目がありません</p>
                   ) : (
                     subItems.map((subItem, index) => (
-                      <article key={subItem.id} className="subitem-card">
+                      <article
+                        key={subItem.id}
+                        className={`subitem-card ${selectedSubItemId === subItem.id ? 'active' : ''}`}
+                      >
                         <header className="subitem-header">
-                          <div>
-                            <h3>{subItem.title}</h3>
-                            <p className="subtle">{subItem.scheduled_on || '日付未設定'}</p>
-                          </div>
+                          <button
+                            type="button"
+                            className="subitem-select"
+                            onClick={() => setSelectedSubItemId(subItem.id)}
+                          >
+                            {subItem.title}
+                          </button>
                           <div className="subitem-actions">
                             <button
                               type="button"
@@ -891,15 +990,6 @@ function App() {
                             </button>
                           </div>
                         </header>
-                        {subItem.tags && subItem.tags.length > 0 && (
-                          <div className="tag-list">
-                            {subItem.tags.map((tag) => (
-                              <span key={`${subItem.id}-${tag}`} className="tag-chip">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </article>
                     ))
                   )
@@ -910,11 +1000,31 @@ function App() {
             </section>
 
             <section className="main-section">
+              <h3>本文</h3>
+              {selectedSubItem ? (
+                <>
+                  <p className="subtle">選択中: {selectedSubItem.title}</p>
+                  <textarea
+                    className="body-editor"
+                    value={subItemBodyDraft}
+                    onChange={(event) => setSubItemBodyDraft(event.target.value)}
+                    placeholder="ここに本文を入力"
+                  />
+                  <button type="button" onClick={saveSelectedSubItemBody}>
+                    本文を保存
+                  </button>
+                </>
+              ) : (
+                <p className="subtle">本文を編集する項目内項目を一覧から選択してください</p>
+              )}
+            </section>
+
+            <section className="main-section">
               <h3>日付</h3>
               <input
                 type="date"
                 value={mainScheduledOn}
-                onChange={(event) => setMainScheduledOn(event.target.value)}
+                onChange={(event) => void handleMainDateChange(event.target.value)}
                 disabled={!selectedItemId}
               />
             </section>
@@ -932,7 +1042,7 @@ function App() {
                       className={`ghost-button tag-preset-button ${
                         mainSelectedTags.includes(tag.name) ? 'active' : ''
                       }`}
-                      onClick={() => toggleMainTag(tag.name)}
+                      onClick={() => void toggleMainTag(tag.name)}
                       disabled={!selectedItemId}
                     >
                       {tag.name}

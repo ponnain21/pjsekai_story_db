@@ -13,8 +13,15 @@ create table if not exists public.nodes (
   type text not null check (type in ('game', 'arc', 'session')),
   title text not null,
   parent_id uuid null references public.nodes (id) on delete cascade,
+  scheduled_on date null,
+  tags text[] not null default '{}',
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.nodes
+  add column if not exists scheduled_on date null;
+alter table if exists public.nodes
+  add column if not exists tags text[] not null default '{}';
 
 create table if not exists public.threads (
   id uuid primary key default gen_random_uuid(),
