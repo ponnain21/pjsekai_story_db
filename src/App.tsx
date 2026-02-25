@@ -963,7 +963,6 @@ function App() {
               ))
             )}
           </div>
-          <p className="subtle">同じ項目をもう一度押すと詳細ウインドウを開きます。</p>
 
         </aside>
 
