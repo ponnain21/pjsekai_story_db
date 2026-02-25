@@ -684,6 +684,11 @@ function App() {
     }
   }
 
+  const onSubmitPresetDialogForm = (event: FormEvent) => {
+    event.preventDefault()
+    void submitPresetDialog()
+  }
+
   const requestDeleteFromPresetDialog = () => {
     if (!presetDialog || presetDialog.mode !== 'edit' || !presetDialog.id) return
 
@@ -1255,7 +1260,7 @@ function App() {
 
       {presetDialog && (
         <div className="overlay">
-          <section className="dialog-panel">
+          <form className="dialog-panel" onSubmit={onSubmitPresetDialogForm}>
             <h2>
               {presetDialog.kind === 'template'
                 ? presetDialog.mode === 'create'
@@ -1293,11 +1298,11 @@ function App() {
                   削除
                 </button>
               )}
-              <button type="button" onClick={submitPresetDialog} disabled={dialogBusy}>
+              <button type="submit" disabled={dialogBusy}>
                 {presetDialog.mode === 'create' ? '作成' : '保存'}
               </button>
             </div>
-          </section>
+          </form>
         </div>
       )}
 
