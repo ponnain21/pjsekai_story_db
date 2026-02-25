@@ -470,16 +470,23 @@ function App() {
     table: 'nodes' | 'threads' | 'subitem_templates' | 'subitem_tag_presets',
     orderedIds: string[],
   ) => {
-    const payload = orderedIds.map((id, index) => ({ id, sort_order: index }))
-    const { error: updateError } = await supabase.from(table).upsert(payload, { onConflict: 'id' })
-    if (updateError) {
-      if (updateError.message.includes('sort_order')) {
-        setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
-      } else {
-        setError(updateError.message)
+    for (let index = 0; index < orderedIds.length; index += 1) {
+      const id = orderedIds[index]
+      const { error: updateError } = await supabase
+        .from(table)
+        .update({ sort_order: index })
+        .eq('id', id)
+
+      if (updateError) {
+        if (updateError.message.includes('sort_order')) {
+          setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+        } else {
+          setError(updateError.message)
+        }
+        return false
       }
-      return false
     }
+
     return true
   }
 
