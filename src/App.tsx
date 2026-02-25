@@ -57,9 +57,11 @@ function App() {
   const [renameItemTitle, setRenameItemTitle] = useState('')
 
   const [settingsTemplateTitle, setSettingsTemplateTitle] = useState('')
-  const [newTagName, setNewTagName] = useState('')
+  const [settingsNewTagName, setSettingsNewTagName] = useState('')
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
+  const [mainTemplateTitle, setMainTemplateTitle] = useState('')
+  const [mainNewTagName, setMainNewTagName] = useState('')
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSettingsTemplate =
@@ -322,9 +324,9 @@ function App() {
     )
   }
 
-  const addTagPreset = async () => {
+  const addTagPresetFromSettings = async () => {
     setError('')
-    const trimmed = newTagName.trim()
+    const trimmed = settingsNewTagName.trim()
     if (!trimmed) {
       setError('追加するタグ名を入力してください。')
       return
@@ -339,7 +341,28 @@ function App() {
       return
     }
 
-    setNewTagName('')
+    setSettingsNewTagName('')
+    await loadTagPresets()
+  }
+
+  const addTagPresetFromMain = async () => {
+    setError('')
+    const trimmed = mainNewTagName.trim()
+    if (!trimmed) {
+      setError('追加するタグ名を入力してください。')
+      return
+    }
+
+    const { error: insertError } = await supabase
+      .from('subitem_tag_presets')
+      .upsert({ name: trimmed }, { onConflict: 'name', ignoreDuplicates: true })
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    setMainNewTagName('')
     await loadTagPresets()
   }
 
@@ -384,6 +407,30 @@ function App() {
 
     await loadSubItemTemplates()
     if (data?.id) setSelectedSettingsTemplateId(data.id)
+  }
+
+  const createTemplateFromMain = async () => {
+    setError('')
+
+    if (!mainTemplateTitle.trim()) {
+      setError('追加する項目内項目名を入力してください。')
+      return
+    }
+
+    const { error: insertError } = await supabase.from('subitem_templates').insert({
+      title: mainTemplateTitle.trim(),
+      scheduled_on: null,
+      tags: [],
+      body: '',
+    })
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    setMainTemplateTitle('')
+    await loadSubItemTemplates()
   }
 
   const updateSelectedTemplate = async () => {
@@ -705,11 +752,11 @@ function App() {
               </div>
               <div className="tag-create-row">
                 <input
-                  value={newTagName}
-                  onChange={(event) => setNewTagName(event.target.value)}
+                  value={settingsNewTagName}
+                  onChange={(event) => setSettingsNewTagName(event.target.value)}
                   placeholder="新しいタグ名"
                 />
-                <button type="button" onClick={addTagPreset}>
+                <button type="button" onClick={addTagPresetFromSettings}>
                   タグ追加
                 </button>
               </div>
@@ -804,7 +851,7 @@ function App() {
               <h3>項目タグ</h3>
               <div className="tag-picker">
                 {tagPresets.length === 0 ? (
-                  <p className="subtle">設定ページで項目タグを追加してください</p>
+                  <p className="subtle">タグがありません。下から追加できます</p>
                 ) : (
                   tagPresets.map((tag) => (
                     <button
@@ -821,13 +868,35 @@ function App() {
                   ))
                 )}
               </div>
+              <div className="main-create-row">
+                <input
+                  value={mainNewTagName}
+                  onChange={(event) => setMainNewTagName(event.target.value)}
+                  placeholder="新しいタグ名"
+                  disabled={!selectedItemId}
+                />
+                <button type="button" onClick={addTagPresetFromMain} disabled={!selectedItemId}>
+                  タグ追加
+                </button>
+              </div>
             </section>
 
             <section className="main-section subitem-form">
               <h3>項目内項目追加</h3>
+              <div className="main-create-row">
+                <input
+                  value={mainTemplateTitle}
+                  onChange={(event) => setMainTemplateTitle(event.target.value)}
+                  placeholder="新しい項目内項目名"
+                  disabled={!selectedItemId}
+                />
+                <button type="button" onClick={createTemplateFromMain} disabled={!selectedItemId}>
+                  項目内項目を追加
+                </button>
+              </div>
               <div className="template-button-list">
                 {subItemTemplates.length === 0 ? (
-                  <p className="subtle">設定ページで項目内項目を先に登録してください</p>
+                  <p className="subtle">項目内項目がありません。上から追加できます</p>
                 ) : (
                   subItemTemplates.map((template) => (
                     <button

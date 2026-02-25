@@ -242,6 +242,13 @@
   align-items: center;
 }
 
+.main-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
 .preset-list {
   min-height: 0;
   max-height: 18rem;
@@ -398,7 +405,8 @@ button:disabled {
   }
 
   .tag-create-row,
-  .item-create-row {
+  .item-create-row,
+  .main-create-row {
     grid-template-columns: 1fr;
   }
 }
