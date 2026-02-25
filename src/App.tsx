@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { DragEvent, FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import './App.css'
@@ -9,6 +9,7 @@ type ItemRow = {
   title: string
   scheduled_on: string | null
   tags: string[] | null
+  sort_order: number
   created_at: string
 }
 
@@ -26,14 +27,18 @@ type SubItemRow = {
 type SubItemTemplateRow = {
   id: string
   title: string
+  sort_order: number
   created_at: string
 }
 
 type TagPresetRow = {
   id: string
   name: string
+  sort_order: number
   created_at: string
 }
+
+type SortableKind = 'item' | 'subitem' | 'template' | 'tag'
 
 type PresetDialogState = {
   kind: 'template' | 'tag'
@@ -49,6 +54,21 @@ type ConfirmDialogState = {
 }
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
+
+const reorderRowsByIds = <T extends { id: string; sort_order: number }>(
+  rows: T[],
+  draggedId: string,
+  targetId: string,
+) => {
+  const fromIndex = rows.findIndex((row) => row.id === draggedId)
+  const toIndex = rows.findIndex((row) => row.id === targetId)
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return rows
+
+  const next = [...rows]
+  const [dragged] = next.splice(fromIndex, 1)
+  next.splice(toIndex, 0, dragged)
+  return next.map((row, index) => ({ ...row, sort_order: index }))
+}
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -81,6 +101,7 @@ function App() {
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
+  const [dragState, setDragState] = useState<{ kind: SortableKind; id: string } | null>(null)
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
@@ -171,8 +192,9 @@ function App() {
 
     const { data, error: loadError } = await supabase
       .from('nodes')
-      .select('id, title, scheduled_on, tags, created_at')
+      .select('id, title, scheduled_on, tags, sort_order, created_at')
       .is('parent_id', null)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
@@ -187,11 +209,14 @@ function App() {
         return
       }
 
-      const fallbackItems = ((legacyData ?? []) as Omit<ItemRow, 'scheduled_on' | 'tags'>[]).map((item) => ({
+      const fallbackItems = ((legacyData ?? []) as Omit<ItemRow, 'scheduled_on' | 'tags' | 'sort_order'>[]).map(
+        (item) => ({
         ...item,
         scheduled_on: null,
         tags: [],
-      }))
+        sort_order: 0,
+        }),
+      )
       applyLoadedItems(fallbackItems)
       return
     }
@@ -221,41 +246,77 @@ function App() {
   }
 
   const loadSubItemTemplates = async () => {
+    const applyLoadedTemplates = (loadedTemplates: SubItemTemplateRow[]) => {
+      setSubItemTemplates(loadedTemplates)
+      setSelectedSettingsTemplateId((current) => {
+        if (current && loadedTemplates.some((template) => template.id === current)) return current
+        return null
+      })
+    }
+
     const { data, error: loadError } = await supabase
       .from('subitem_templates')
-      .select('id, title, created_at')
+      .select('id, title, sort_order, created_at')
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
-      setError(loadError.message)
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('subitem_templates')
+        .select('id, title, created_at')
+        .order('created_at', { ascending: true })
+
+      if (legacyError) {
+        setError(loadError.message)
+        return
+      }
+
+      const fallbackTemplates = ((legacyData ?? []) as Omit<SubItemTemplateRow, 'sort_order'>[]).map((template) => ({
+        ...template,
+        sort_order: 0,
+      }))
+      applyLoadedTemplates(fallbackTemplates)
       return
     }
 
-    const loadedTemplates = (data ?? []) as SubItemTemplateRow[]
-    setSubItemTemplates(loadedTemplates)
-    setSelectedSettingsTemplateId((current) => {
-      if (current && loadedTemplates.some((template) => template.id === current)) return current
-      return null
-    })
+    applyLoadedTemplates((data ?? []) as SubItemTemplateRow[])
   }
 
   const loadTagPresets = async () => {
+    const applyLoadedTags = (loadedTags: TagPresetRow[]) => {
+      setTagPresets(loadedTags)
+      setSelectedSettingsTagId((current) => {
+        if (current && loadedTags.some((tag) => tag.id === current)) return current
+        return null
+      })
+    }
+
     const { data, error: loadError } = await supabase
       .from('subitem_tag_presets')
-      .select('id, name, created_at')
+      .select('id, name, sort_order, created_at')
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
-      setError(loadError.message)
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('subitem_tag_presets')
+        .select('id, name, created_at')
+        .order('created_at', { ascending: true })
+
+      if (legacyError) {
+        setError(loadError.message)
+        return
+      }
+
+      const fallbackTags = ((legacyData ?? []) as Omit<TagPresetRow, 'sort_order'>[]).map((tag) => ({
+        ...tag,
+        sort_order: 0,
+      }))
+      applyLoadedTags(fallbackTags)
       return
     }
 
-    const loadedTags = (data ?? []) as TagPresetRow[]
-    setTagPresets(loadedTags)
-    setSelectedSettingsTagId((current) => {
-      if (current && loadedTags.some((tag) => tag.id === current)) return current
-      return null
-    })
+    applyLoadedTags((data ?? []) as TagPresetRow[])
   }
 
   useEffect(() => {
@@ -313,14 +374,21 @@ function App() {
       return
     }
 
+    const nextSortOrder = items.length === 0 ? 0 : Math.max(...items.map((item) => item.sort_order)) + 1
+
     const { error: insertError } = await supabase.from('nodes').insert({
       type: 'game',
       title: itemTitle.trim(),
       parent_id: null,
+      sort_order: nextSortOrder,
     })
 
     if (insertError) {
-      setError(insertError.message)
+      if (insertError.message.includes('sort_order')) {
+        setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(insertError.message)
+      }
       return
     }
 
@@ -398,6 +466,87 @@ function App() {
     await saveItemMeta(value, mainSelectedTags)
   }
 
+  const persistSortOrder = async (
+    table: 'nodes' | 'threads' | 'subitem_templates' | 'subitem_tag_presets',
+    orderedIds: string[],
+  ) => {
+    const payload = orderedIds.map((id, index) => ({ id, sort_order: index }))
+    const { error: updateError } = await supabase.from(table).upsert(payload, { onConflict: 'id' })
+    if (updateError) {
+      if (updateError.message.includes('sort_order')) {
+        setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(updateError.message)
+      }
+      return false
+    }
+    return true
+  }
+
+  const reorderItems = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(items, draggedId, targetId)
+    setItems(reordered)
+    const ok = await persistSortOrder(
+      'nodes',
+      reordered.map((row) => row.id),
+    )
+    if (!ok) await loadItems()
+  }
+
+  const reorderSubItems = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(subItems, draggedId, targetId)
+    setSubItems(reordered)
+    const ok = await persistSortOrder(
+      'threads',
+      reordered.map((row) => row.id),
+    )
+    if (!ok && selectedItemId) await loadSubItems(selectedItemId)
+  }
+
+  const reorderTemplates = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(subItemTemplates, draggedId, targetId)
+    setSubItemTemplates(reordered)
+    const ok = await persistSortOrder(
+      'subitem_templates',
+      reordered.map((row) => row.id),
+    )
+    if (!ok) await loadSubItemTemplates()
+  }
+
+  const reorderTags = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(tagPresets, draggedId, targetId)
+    setTagPresets(reordered)
+    const ok = await persistSortOrder(
+      'subitem_tag_presets',
+      reordered.map((row) => row.id),
+    )
+    if (!ok) await loadTagPresets()
+  }
+
+  const startSortDrag = (kind: SortableKind, id: string, event: DragEvent<HTMLElement>) => {
+    setDragState({ kind, id })
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const allowSortDrop = (kind: SortableKind, id: string, event: DragEvent<HTMLElement>) => {
+    if (dragState && dragState.kind === kind && dragState.id !== id) {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+    }
+  }
+
+  const dropSort = async (kind: SortableKind, targetId: string, event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    if (!dragState || dragState.kind !== kind || dragState.id === targetId) return
+
+    if (kind === 'item') await reorderItems(dragState.id, targetId)
+    if (kind === 'subitem') await reorderSubItems(dragState.id, targetId)
+    if (kind === 'template') await reorderTemplates(dragState.id, targetId)
+    if (kind === 'tag') await reorderTags(dragState.id, targetId)
+
+    setDragState(null)
+  }
+
   const openConfirmDialog = (dialog: ConfirmDialogState) => {
     setConfirmDialog(dialog)
   }
@@ -449,6 +598,8 @@ function App() {
     try {
       if (presetDialog.kind === 'template') {
         if (presetDialog.mode === 'create') {
+          const nextSortOrder =
+            subItemTemplates.length === 0 ? 0 : Math.max(...subItemTemplates.map((template) => template.sort_order)) + 1
           const { data, error: insertError } = await supabase
             .from('subitem_templates')
             .insert({
@@ -456,11 +607,16 @@ function App() {
               scheduled_on: null,
               tags: [],
               body: '',
+              sort_order: nextSortOrder,
             })
             .select('id')
             .single()
           if (insertError) {
-            setError(insertError.message)
+            if (insertError.message.includes('sort_order')) {
+              setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+            } else {
+              setError(insertError.message)
+            }
             return
           }
           await loadSubItemTemplates()
@@ -482,13 +638,18 @@ function App() {
         }
       } else {
         if (presetDialog.mode === 'create') {
+          const nextSortOrder = tagPresets.length === 0 ? 0 : Math.max(...tagPresets.map((tag) => tag.sort_order)) + 1
           const { data, error: insertError } = await supabase
             .from('subitem_tag_presets')
-            .upsert({ name: trimmed }, { onConflict: 'name' })
+            .upsert({ name: trimmed, sort_order: nextSortOrder }, { onConflict: 'name' })
             .select('id')
             .single()
           if (insertError) {
-            setError(insertError.message)
+            if (insertError.message.includes('sort_order')) {
+              setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+            } else {
+              setError(insertError.message)
+            }
             return
           }
           await loadTagPresets()
@@ -653,41 +814,6 @@ function App() {
     await saveItemMeta(mainScheduledOn, nextTags)
   }
 
-  const moveSubItem = async (subItemId: string, direction: 'up' | 'down') => {
-    if (!selectedItemId) return
-
-    const currentIndex = subItems.findIndex((subItem) => subItem.id === subItemId)
-    if (currentIndex < 0) return
-
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    if (targetIndex < 0 || targetIndex >= subItems.length) return
-
-    const current = subItems[currentIndex]
-    const target = subItems[targetIndex]
-
-    setError('')
-
-    const { error: firstError } = await supabase
-      .from('threads')
-      .update({ sort_order: target.sort_order })
-      .eq('id', current.id)
-    if (firstError) {
-      setError(firstError.message)
-      return
-    }
-
-    const { error: secondError } = await supabase
-      .from('threads')
-      .update({ sort_order: current.sort_order })
-      .eq('id', target.id)
-    if (secondError) {
-      setError(secondError.message)
-      return
-    }
-
-    await loadSubItems(selectedItemId)
-  }
-
   const deleteSubItem = async (subItem: SubItemRow) => {
     setError('')
 
@@ -797,8 +923,15 @@ function App() {
               items.map((item) => (
                 <button
                   key={item.id}
-                  className={`list-item item-list-item ${selectedItemId === item.id ? 'active' : ''}`}
+                  className={`list-item item-list-item ${selectedItemId === item.id ? 'active' : ''} ${
+                    dragState?.kind === 'item' && dragState.id === item.id ? 'dragging' : ''
+                  }`}
                   onClick={() => setSelectedItemId(item.id)}
+                  draggable
+                  onDragStart={(event) => startSortDrag('item', item.id, event)}
+                  onDragOver={(event) => allowSortDrop('item', item.id, event)}
+                  onDrop={(event) => void dropSort('item', item.id, event)}
+                  onDragEnd={() => setDragState(null)}
                 >
                   {item.title}
                 </button>
@@ -860,8 +993,13 @@ function App() {
                       type="button"
                       className={`ghost-button template-button ${
                         selectedSettingsTemplateId === template.id ? 'active' : ''
-                      }`}
+                      } ${dragState?.kind === 'template' && dragState.id === template.id ? 'dragging' : ''}`}
                       onClick={() => handleSettingsTemplateButton(template)}
+                      draggable
+                      onDragStart={(event) => startSortDrag('template', template.id, event)}
+                      onDragOver={(event) => allowSortDrop('template', template.id, event)}
+                      onDrop={(event) => void dropSort('template', template.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {template.title}
                     </button>
@@ -886,8 +1024,13 @@ function App() {
                       type="button"
                       className={`ghost-button template-button ${
                         selectedSettingsTagId === tag.id ? 'active' : ''
-                      }`}
+                      } ${dragState?.kind === 'tag' && dragState.id === tag.id ? 'dragging' : ''}`}
                       onClick={() => handleSettingsTagButton(tag)}
+                      draggable
+                      onDragStart={(event) => startSortDrag('tag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
+                      onDrop={(event) => void dropSort('tag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {tag.name}
                     </button>
@@ -920,10 +1063,17 @@ function App() {
                   subItems.length === 0 ? (
                     <p className="subtle">まだ項目内項目がありません</p>
                   ) : (
-                    subItems.map((subItem, index) => (
+                    subItems.map((subItem) => (
                       <article
                         key={subItem.id}
-                        className={`subitem-card ${selectedSubItemId === subItem.id ? 'active' : ''}`}
+                        className={`subitem-card ${selectedSubItemId === subItem.id ? 'active' : ''} ${
+                          dragState?.kind === 'subitem' && dragState.id === subItem.id ? 'dragging' : ''
+                        }`}
+                        draggable
+                        onDragStart={(event) => startSortDrag('subitem', subItem.id, event)}
+                        onDragOver={(event) => allowSortDrop('subitem', subItem.id, event)}
+                        onDrop={(event) => void dropSort('subitem', subItem.id, event)}
+                        onDragEnd={() => setDragState(null)}
                       >
                         <header className="subitem-header">
                           <button
@@ -934,22 +1084,6 @@ function App() {
                             {subItem.title}
                           </button>
                           <div className="subitem-actions">
-                            <button
-                              type="button"
-                              className="ghost-button mini-action"
-                              onClick={() => void moveSubItem(subItem.id, 'up')}
-                              disabled={index === 0}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button mini-action"
-                              onClick={() => void moveSubItem(subItem.id, 'down')}
-                              disabled={index === subItems.length - 1}
-                            >
-                              ↓
-                            </button>
                             <button
                               type="button"
                               className="danger-button mini-action"
@@ -1023,9 +1157,14 @@ function App() {
                       type="button"
                       className={`ghost-button tag-preset-button ${
                         mainSelectedTags.includes(tag.name) ? 'active' : ''
-                      }`}
+                      } ${dragState?.kind === 'tag' && dragState.id === tag.id ? 'dragging' : ''}`}
                       onClick={() => void handleMainTagButton(tag)}
                       disabled={!selectedItemId}
+                      draggable
+                      onDragStart={(event) => startSortDrag('tag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
+                      onDrop={(event) => void dropSort('tag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {tag.name}
                     </button>
@@ -1064,9 +1203,14 @@ function App() {
                       type="button"
                       className={`ghost-button template-button ${
                         mainSelectedTemplateIds.includes(template.id) ? 'active' : ''
-                      }`}
+                      } ${dragState?.kind === 'template' && dragState.id === template.id ? 'dragging' : ''}`}
                       onClick={() => void handleMainTemplateButton(template)}
                       disabled={!selectedItemId}
+                      draggable
+                      onDragStart={(event) => startSortDrag('template', template.id, event)}
+                      onDragOver={(event) => allowSortDrop('template', template.id, event)}
+                      onDrop={(event) => void dropSort('template', template.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {template.title}
                     </button>
