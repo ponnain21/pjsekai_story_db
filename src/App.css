@@ -136,6 +136,47 @@
   min-height: 0;
 }
 
+.mode-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.mode-toggle-button.active {
+  border-color: #1f8bc7;
+  background: #e7f5ff;
+  color: #155f8d;
+}
+
+.episode-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+}
+
+.episode-list {
+  min-height: 0;
+  max-height: 32vh;
+  overflow: auto;
+  border: 1px solid #e1e8ee;
+  border-radius: 10px;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.episode-list-item {
+  text-align: left;
+  cursor: grab;
+  padding: 0.4rem 0.55rem;
+}
+
+.episode-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .body-page-section .body-editor {
   min-height: min(58vh, 34rem);
 }
@@ -193,6 +234,17 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.subitem-mode-badge {
+  border: 1px solid #c6d2dc;
+  background: #ffffff;
+  color: #516474;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  white-space: nowrap;
 }
 
 .tag-list {
@@ -479,5 +531,9 @@ button:disabled {
   .body-page-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .episode-create-row {
+    grid-template-columns: 1fr;
   }
 }

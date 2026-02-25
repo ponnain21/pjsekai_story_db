@@ -4,6 +4,7 @@
 alter table if exists public.allowed_users enable row level security;
 alter table if exists public.nodes enable row level security;
 alter table if exists public.threads enable row level security;
+alter table if exists public.subitem_episodes enable row level security;
 alter table if exists public.entries enable row level security;
 alter table if exists public.subitem_templates enable row level security;
 alter table if exists public.subitem_tag_presets enable row level security;
@@ -119,6 +120,61 @@ with check (
 drop policy if exists "threads_delete_allowlisted" on public.threads;
 create policy "threads_delete_allowlisted"
 on public.threads for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_episodes_select_allowlisted" on public.subitem_episodes;
+create policy "subitem_episodes_select_allowlisted"
+on public.subitem_episodes for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_episodes_insert_allowlisted" on public.subitem_episodes;
+create policy "subitem_episodes_insert_allowlisted"
+on public.subitem_episodes for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_episodes_update_allowlisted" on public.subitem_episodes;
+create policy "subitem_episodes_update_allowlisted"
+on public.subitem_episodes for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "subitem_episodes_delete_allowlisted" on public.subitem_episodes;
+create policy "subitem_episodes_delete_allowlisted"
+on public.subitem_episodes for delete
 to authenticated
 using (
   exists (

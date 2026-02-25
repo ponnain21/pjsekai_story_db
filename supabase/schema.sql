@@ -30,6 +30,7 @@ create table if not exists public.threads (
   id uuid primary key default gen_random_uuid(),
   node_id uuid not null references public.nodes (id) on delete cascade,
   title text not null,
+  has_episodes boolean not null default false,
   scheduled_on date null,
   tags text[] not null default '{}',
   body text not null default '',
@@ -38,12 +39,26 @@ create table if not exists public.threads (
 );
 
 alter table if exists public.threads
+  add column if not exists has_episodes boolean not null default false;
+alter table if exists public.threads
   add column if not exists scheduled_on date null;
 alter table if exists public.threads
   add column if not exists tags text[] not null default '{}';
 alter table if exists public.threads
   add column if not exists body text not null default '';
 alter table if exists public.threads
+  add column if not exists sort_order integer not null default 0;
+
+create table if not exists public.subitem_episodes (
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references public.threads (id) on delete cascade,
+  title text not null,
+  body text not null default '',
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table if exists public.subitem_episodes
   add column if not exists sort_order integer not null default 0;
 
 create table if not exists public.subitem_templates (
@@ -82,6 +97,8 @@ create index if not exists idx_nodes_parent_id on public.nodes (parent_id);
 create index if not exists idx_nodes_sort_order on public.nodes (sort_order);
 create index if not exists idx_threads_node_id on public.threads (node_id);
 create index if not exists idx_threads_sort_order on public.threads (sort_order);
+create index if not exists idx_subitem_episodes_thread_id on public.subitem_episodes (thread_id);
+create index if not exists idx_subitem_episodes_sort_order on public.subitem_episodes (sort_order);
 create index if not exists idx_subitem_templates_sort_order on public.subitem_templates (sort_order);
 create index if not exists idx_subitem_tag_presets_sort_order on public.subitem_tag_presets (sort_order);
 create index if not exists idx_entries_thread_id on public.entries (thread_id);

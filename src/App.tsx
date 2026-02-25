@@ -17,8 +17,18 @@ type SubItemRow = {
   id: string
   node_id: string
   title: string
+  has_episodes: boolean
   scheduled_on: string | null
   tags: string[] | null
+  body: string
+  sort_order: number
+  created_at: string
+}
+
+type EpisodeRow = {
+  id: string
+  thread_id: string
+  title: string
   body: string
   sort_order: number
   created_at: string
@@ -38,7 +48,7 @@ type TagPresetRow = {
   created_at: string
 }
 
-type SortableKind = 'item' | 'subitem' | 'template' | 'tag'
+type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag'
 
 type PresetDialogState = {
   kind: 'item' | 'template' | 'tag'
@@ -82,6 +92,7 @@ function App() {
 
   const [items, setItems] = useState<ItemRow[]>([])
   const [subItems, setSubItems] = useState<SubItemRow[]>([])
+  const [episodes, setEpisodes] = useState<EpisodeRow[]>([])
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
   const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
 
@@ -89,12 +100,14 @@ function App() {
   const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
   const [selectedSettingsTagId, setSelectedSettingsTagId] = useState<string | null>(null)
   const [selectedSubItemId, setSelectedSubItemId] = useState<string | null>(null)
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null)
 
   const [itemTitle, setItemTitle] = useState('')
 
   const [mainScheduledOn, setMainScheduledOn] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
+  const [episodeTitle, setEpisodeTitle] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
@@ -104,6 +117,7 @@ function App() {
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
+  const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId) ?? null
 
   useEffect(() => {
     setMainScheduledOn(selectedItem?.scheduled_on ?? '')
@@ -111,8 +125,12 @@ function App() {
   }, [selectedItem?.id, selectedItem?.scheduled_on, selectedItem?.tags])
 
   useEffect(() => {
+    if (selectedSubItem?.has_episodes) {
+      setSubItemBodyDraft(selectedEpisode?.body ?? '')
+      return
+    }
     setSubItemBodyDraft(selectedSubItem?.body ?? '')
-  }, [selectedSubItem?.id, selectedSubItem?.body])
+  }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedSubItem?.body, selectedEpisode?.id, selectedEpisode?.body])
 
   useEffect(() => {
     if (pageMode === 'subitemBody' && !selectedSubItemId) {
@@ -229,13 +247,33 @@ function App() {
   const loadSubItems = async (itemId: string) => {
     const { data, error: loadError } = await supabase
       .from('threads')
-      .select('id, node_id, title, scheduled_on, tags, body, sort_order, created_at')
+      .select('id, node_id, title, has_episodes, scheduled_on, tags, body, sort_order, created_at')
       .eq('node_id', itemId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
-      setError(loadError.message)
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('threads')
+        .select('id, node_id, title, scheduled_on, tags, body, sort_order, created_at')
+        .eq('node_id', itemId)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+
+      if (legacyError) {
+        setError(loadError.message)
+        return
+      }
+
+      const fallbackSubItems = ((legacyData ?? []) as Omit<SubItemRow, 'has_episodes'>[]).map((subItem) => ({
+        ...subItem,
+        has_episodes: false,
+      }))
+      setSubItems(fallbackSubItems)
+      setSelectedSubItemId((current) => {
+        if (current && fallbackSubItems.some((subItem) => subItem.id === current)) return current
+        return fallbackSubItems[0]?.id ?? null
+      })
       return
     }
 
@@ -244,6 +282,27 @@ function App() {
     setSelectedSubItemId((current) => {
       if (current && loadedSubItems.some((subItem) => subItem.id === current)) return current
       return loadedSubItems[0]?.id ?? null
+    })
+  }
+
+  const loadEpisodes = async (subItemId: string) => {
+    const { data, error: loadError } = await supabase
+      .from('subitem_episodes')
+      .select('id, thread_id, title, body, sort_order, created_at')
+      .eq('thread_id', subItemId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      setError(loadError.message)
+      return
+    }
+
+    const loadedEpisodes = (data ?? []) as EpisodeRow[]
+    setEpisodes(loadedEpisodes)
+    setSelectedEpisodeId((current) => {
+      if (current && loadedEpisodes.some((episode) => episode.id === current)) return current
+      return loadedEpisodes[0]?.id ?? null
     })
   }
 
@@ -325,12 +384,14 @@ function App() {
     if (!session || accessStatus !== 'allowed') {
       setItems([])
       setSubItems([])
+      setEpisodes([])
       setSubItemTemplates([])
       setTagPresets([])
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
       setSelectedSettingsTagId(null)
       setSelectedSubItemId(null)
+      setSelectedEpisodeId(null)
       return
     }
     void loadItems()
@@ -341,12 +402,23 @@ function App() {
   useEffect(() => {
     if (!selectedItemId) {
       setSubItems([])
+      setEpisodes([])
       setSelectedSubItemId(null)
+      setSelectedEpisodeId(null)
       setMainSelectedTemplateIds([])
       return
     }
     void loadSubItems(selectedItemId)
   }, [selectedItemId])
+
+  useEffect(() => {
+    if (!selectedSubItemId || !selectedSubItem?.has_episodes) {
+      setEpisodes([])
+      setSelectedEpisodeId(null)
+      return
+    }
+    void loadEpisodes(selectedSubItemId)
+  }, [selectedSubItemId, selectedSubItem?.has_episodes])
 
   const loginWithGoogle = async () => {
     setError('')
@@ -444,7 +516,7 @@ function App() {
   }
 
   const persistSortOrder = async (
-    table: 'nodes' | 'threads' | 'subitem_templates' | 'subitem_tag_presets',
+    table: 'nodes' | 'threads' | 'subitem_episodes' | 'subitem_templates' | 'subitem_tag_presets',
     orderedIds: string[],
   ) => {
     for (let index = 0; index < orderedIds.length; index += 1) {
@@ -487,6 +559,16 @@ function App() {
     if (!ok && selectedItemId) await loadSubItems(selectedItemId)
   }
 
+  const reorderEpisodes = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(episodes, draggedId, targetId)
+    setEpisodes(reordered)
+    const ok = await persistSortOrder(
+      'subitem_episodes',
+      reordered.map((row) => row.id),
+    )
+    if (!ok && selectedSubItemId) await loadEpisodes(selectedSubItemId)
+  }
+
   const reorderTemplates = async (draggedId: string, targetId: string) => {
     const reordered = reorderRowsByIds(subItemTemplates, draggedId, targetId)
     setSubItemTemplates(reordered)
@@ -525,6 +607,7 @@ function App() {
 
     if (kind === 'item') await reorderItems(dragState.id, targetId)
     if (kind === 'subitem') await reorderSubItems(dragState.id, targetId)
+    if (kind === 'episode') await reorderEpisodes(dragState.id, targetId)
     if (kind === 'template') await reorderTemplates(dragState.id, targetId)
     if (kind === 'tag') await reorderTags(dragState.id, targetId)
 
@@ -769,6 +852,85 @@ function App() {
     setPageMode('subitemBody')
   }
 
+  const saveSubItemHasEpisodes = async (hasEpisodes: boolean) => {
+    if (!selectedSubItem) return
+    setError('')
+
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({ has_episodes: hasEpisodes })
+      .eq('id', selectedSubItem.id)
+
+    if (updateError) {
+      if (updateError.message.includes('has_episodes')) {
+        setError('threads テーブルに has_episodes 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(updateError.message)
+      }
+      return
+    }
+
+    if (selectedItemId) await loadSubItems(selectedItemId)
+    if (!hasEpisodes) {
+      setEpisodes([])
+      setSelectedEpisodeId(null)
+    }
+  }
+
+  const addEpisode = async () => {
+    if (!selectedSubItem) {
+      setError('先に項目内項目を選択してください。')
+      return
+    }
+
+    if (!selectedSubItem.has_episodes) {
+      setError('まず「話あり」を選択してください。')
+      return
+    }
+
+    const trimmedTitle = episodeTitle.trim()
+    if (!trimmedTitle) {
+      setError('話タイトルを入力してください。')
+      return
+    }
+
+    const nextSortOrder = episodes.length === 0 ? 0 : Math.max(...episodes.map((episode) => episode.sort_order)) + 1
+    const { data, error: insertError } = await supabase
+      .from('subitem_episodes')
+      .insert({
+        thread_id: selectedSubItem.id,
+        title: trimmedTitle,
+        body: '',
+        sort_order: nextSortOrder,
+      })
+      .select('id')
+      .single()
+
+    if (insertError) {
+      setError(insertError.message)
+      return
+    }
+
+    setEpisodeTitle('')
+    await loadEpisodes(selectedSubItem.id)
+    if (data?.id) setSelectedEpisodeId(data.id)
+  }
+
+  const deleteSelectedEpisode = async () => {
+    if (!selectedEpisode || !selectedSubItemId) {
+      setError('削除する話を選択してください。')
+      return
+    }
+
+    const { error: deleteError } = await supabase.from('subitem_episodes').delete().eq('id', selectedEpisode.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    await loadEpisodes(selectedSubItemId)
+  }
+
   const handleMainTemplateButton = (template: SubItemTemplateRow) => {
     if (mainSelectedTemplateIds.includes(template.id)) {
       openEditPresetDialog('template', template.id)
@@ -808,6 +970,7 @@ function App() {
     const payload = selectedTemplates.map((template, index) => ({
       node_id: selectedItemId,
       title: template.title,
+      has_episodes: false,
       scheduled_on: null,
       tags: [],
       body: '',
@@ -816,7 +979,11 @@ function App() {
 
     const { error: insertError } = await supabase.from('threads').insert(payload)
     if (insertError) {
-      setError(insertError.message)
+      if (insertError.message.includes('has_episodes')) {
+        setError('threads テーブルに has_episodes 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(insertError.message)
+      }
       return
     }
 
@@ -873,10 +1040,27 @@ function App() {
       return
     }
 
-    const { error: updateError } = await supabase
-      .from('threads')
-      .update({ body: subItemBodyDraft })
-      .eq('id', selectedSubItem.id)
+    if (selectedSubItem.has_episodes) {
+      if (!selectedEpisode) {
+        setError('本文を保存する話を選択してください。')
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('subitem_episodes')
+        .update({ body: subItemBodyDraft })
+        .eq('id', selectedEpisode.id)
+
+      if (updateError) {
+        setError(updateError.message)
+        return
+      }
+
+      if (selectedSubItemId) await loadEpisodes(selectedSubItemId)
+      return
+    }
+
+    const { error: updateError } = await supabase.from('threads').update({ body: subItemBodyDraft }).eq('id', selectedSubItem.id)
 
     if (updateError) {
       setError(updateError.message)
@@ -1074,13 +1258,96 @@ function App() {
                 <section className="main-section body-page-section">
                   {selectedSubItem ? (
                     <>
+                      <div className="mode-toggle-group">
+                        <button
+                          type="button"
+                          className={`ghost-button mode-toggle-button ${!selectedSubItem.has_episodes ? 'active' : ''}`}
+                          onClick={() => void saveSubItemHasEpisodes(false)}
+                        >
+                          話なし（本文1つ）
+                        </button>
+                        <button
+                          type="button"
+                          className={`ghost-button mode-toggle-button ${selectedSubItem.has_episodes ? 'active' : ''}`}
+                          onClick={() => void saveSubItemHasEpisodes(true)}
+                        >
+                          話あり（複数）
+                        </button>
+                      </div>
+
+                      {selectedSubItem.has_episodes ? (
+                        <>
+                          <div className="episode-create-row">
+                            <input
+                              value={episodeTitle}
+                              onChange={(event) => setEpisodeTitle(event.target.value)}
+                              placeholder="新しい話タイトル"
+                            />
+                            <button type="button" onClick={addEpisode}>
+                              話を追加
+                            </button>
+                          </div>
+
+                          <div className="episode-list">
+                            {episodes.length === 0 ? (
+                              <p className="subtle">話がまだありません。上で作成してください。</p>
+                            ) : (
+                              episodes.map((episode) => (
+                                <button
+                                  key={episode.id}
+                                  type="button"
+                                  className={`list-item episode-list-item ${selectedEpisodeId === episode.id ? 'active' : ''} ${
+                                    dragState?.kind === 'episode' && dragState.id === episode.id ? 'dragging' : ''
+                                  }`}
+                                  onClick={() => setSelectedEpisodeId(episode.id)}
+                                  draggable
+                                  onDragStart={(event) => startSortDrag('episode', episode.id, event)}
+                                  onDragOver={(event) => allowSortDrop('episode', episode.id, event)}
+                                  onDrop={(event) => void dropSort('episode', episode.id, event)}
+                                  onDragEnd={() => setDragState(null)}
+                                >
+                                  {episode.title}
+                                </button>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="episode-actions">
+                            <button
+                              type="button"
+                              className="danger-button"
+                              onClick={() =>
+                                openConfirmDialog({
+                                  title: '話の削除',
+                                  message: selectedEpisode
+                                    ? `「${selectedEpisode.title}」を削除します。`
+                                    : '選択中の話を削除します。',
+                                  confirmLabel: '削除する',
+                                  onConfirm: async () => {
+                                    await deleteSelectedEpisode()
+                                  },
+                                })
+                              }
+                              disabled={!selectedEpisode}
+                            >
+                              選択した話を削除
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
+
                       <textarea
                         className="body-editor"
                         value={subItemBodyDraft}
                         onChange={(event) => setSubItemBodyDraft(event.target.value)}
-                        placeholder="ここに本文を入力"
+                        placeholder={selectedSubItem.has_episodes ? '選択した話の本文を入力' : 'ここに本文を入力'}
+                        disabled={selectedSubItem.has_episodes && !selectedEpisode}
                       />
-                      <button type="button" onClick={saveSelectedSubItemBody}>
+                      <button
+                        type="button"
+                        onClick={saveSelectedSubItemBody}
+                        disabled={selectedSubItem.has_episodes && !selectedEpisode}
+                      >
                         本文を保存
                       </button>
                     </>
@@ -1128,6 +1395,7 @@ function App() {
                                 {subItem.title}
                               </button>
                               <div className="subitem-actions">
+                                <span className="subitem-mode-badge">{subItem.has_episodes ? '話あり' : '話なし'}</span>
                                 <button
                                   type="button"
                                   className="danger-button mini-action"
