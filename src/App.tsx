@@ -8,6 +8,8 @@ type ItemRow = {
   id: string
   title: string
   scheduled_on: string | null
+  scheduled_from: string | null
+  scheduled_to: string | null
   tags: string[] | null
   sort_order: number
   created_at: string
@@ -325,7 +327,8 @@ function App() {
 
   const [itemTitle, setItemTitle] = useState('')
 
-  const [mainScheduledOn, setMainScheduledOn] = useState('')
+  const [mainScheduledFrom, setMainScheduledFrom] = useState('')
+  const [mainScheduledTo, setMainScheduledTo] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [episodeTitle, setEpisodeTitle] = useState('')
@@ -361,9 +364,17 @@ function App() {
   const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId) ?? null
 
   useEffect(() => {
-    setMainScheduledOn(selectedItem?.scheduled_on ?? '')
+    const fallbackDate = selectedItem?.scheduled_on ?? ''
+    setMainScheduledFrom(selectedItem?.scheduled_from ?? fallbackDate)
+    setMainScheduledTo(selectedItem?.scheduled_to ?? '')
     setMainSelectedTags(uniqueStrings(selectedItem?.tags ?? []))
-  }, [selectedItem?.id, selectedItem?.scheduled_on, selectedItem?.tags])
+  }, [
+    selectedItem?.id,
+    selectedItem?.scheduled_on,
+    selectedItem?.scheduled_from,
+    selectedItem?.scheduled_to,
+    selectedItem?.tags,
+  ])
 
   useEffect(() => {
     if (selectedSubItem?.has_episodes) {
@@ -464,13 +475,39 @@ function App() {
 
     const { data, error: loadError } = await supabase
       .from('nodes')
-      .select('id, title, scheduled_on, tags, sort_order, created_at')
+      .select('id, title, scheduled_on, scheduled_from, scheduled_to, tags, sort_order, created_at')
       .is('parent_id', null)
+      .order('scheduled_from', { ascending: true, nullsFirst: false })
       .order('scheduled_on', { ascending: true, nullsFirst: false })
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
+      if (loadError.message.includes('scheduled_from') || loadError.message.includes('scheduled_to')) {
+        const { data: partialData, error: partialError } = await supabase
+          .from('nodes')
+          .select('id, title, scheduled_on, tags, sort_order, created_at')
+          .is('parent_id', null)
+          .order('scheduled_on', { ascending: true, nullsFirst: false })
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true })
+
+        if (partialError) {
+          setError(partialError.message)
+          return
+        }
+
+        const fallbackItems = (
+          (partialData ?? []) as Omit<ItemRow, 'scheduled_from' | 'scheduled_to'>[]
+        ).map((item) => ({
+          ...item,
+          scheduled_from: item.scheduled_on,
+          scheduled_to: null,
+        }))
+        applyLoadedItems(fallbackItems)
+        return
+      }
+
       const { data: legacyData, error: legacyError } = await supabase
         .from('nodes')
         .select('id, title, created_at')
@@ -482,10 +519,12 @@ function App() {
         return
       }
 
-      const fallbackItems = ((legacyData ?? []) as Omit<ItemRow, 'scheduled_on' | 'tags' | 'sort_order'>[]).map(
+      const fallbackItems = ((legacyData ?? []) as Omit<ItemRow, 'scheduled_on' | 'scheduled_from' | 'scheduled_to' | 'tags' | 'sort_order'>[]).map(
         (item) => ({
         ...item,
         scheduled_on: null,
+        scheduled_from: null,
+        scheduled_to: null,
         tags: [],
         sort_order: 0,
         }),
@@ -888,32 +927,51 @@ function App() {
     await loadItems()
   }
 
-  const saveItemMeta = async (scheduledOn: string, tags: string[]) => {
+  const saveItemMeta = async (scheduledFrom: string, scheduledTo: string, tags: string[]) => {
     if (!selectedItemId) return
+    const from = scheduledFrom.trim()
+    const to = scheduledTo.trim()
+    if (from && to && from > to) {
+      setError('日付範囲が不正です。終了日は開始日以降にしてください。')
+      return
+    }
 
     const { error: updateError } = await supabase
       .from('nodes')
       .update({
-        scheduled_on: scheduledOn || null,
+        scheduled_from: from || null,
+        scheduled_to: to || null,
+        scheduled_on: from || null,
         tags: uniqueStrings(tags),
       })
       .eq('id', selectedItemId)
 
     if (updateError) {
-      if (updateError.message.includes('scheduled_on') || updateError.message.includes('tags')) {
-        setError('nodes テーブルに scheduled_on / tags 列が必要です。supabase/schema.sql を実行してください。')
+      if (
+        updateError.message.includes('scheduled_on') ||
+        updateError.message.includes('scheduled_from') ||
+        updateError.message.includes('scheduled_to') ||
+        updateError.message.includes('tags')
+      ) {
+        setError('nodes テーブルに scheduled_on / scheduled_from / scheduled_to / tags 列が必要です。supabase/schema.sql を実行してください。')
       } else {
         setError(updateError.message)
       }
       return
     }
 
+    setError('')
     await loadItems()
   }
 
-  const handleMainDateChange = async (value: string) => {
-    setMainScheduledOn(value)
-    await saveItemMeta(value, mainSelectedTags)
+  const handleMainDateFromChange = async (value: string) => {
+    setMainScheduledFrom(value)
+    await saveItemMeta(value, mainScheduledTo, mainSelectedTags)
+  }
+
+  const handleMainDateToChange = async (value: string) => {
+    setMainScheduledTo(value)
+    await saveItemMeta(mainScheduledFrom, value, mainSelectedTags)
   }
 
   const persistSortOrder = async (
@@ -1223,7 +1281,7 @@ function App() {
         await loadTagPresets()
         const nextTags = mainSelectedTags.filter((name) => name !== tag.name)
         setMainSelectedTags(nextTags)
-        await saveItemMeta(mainScheduledOn, nextTags)
+        await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
         setPresetDialog(null)
       },
     })
@@ -1450,7 +1508,7 @@ function App() {
   const removeMainTag = async (name: string) => {
     const nextTags = mainSelectedTags.filter((tag) => tag !== name)
     setMainSelectedTags(nextTags)
-    await saveItemMeta(mainScheduledOn, nextTags)
+    await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
   }
 
   const handleSettingsTagButton = (tag: TagPresetRow) => {
@@ -1474,7 +1532,7 @@ function App() {
     const nextTags = uniqueStrings([...mainSelectedTags, tag.name])
     setMainSelectedTags(nextTags)
     setSelectedSettingsTagId(tag.id)
-    await saveItemMeta(mainScheduledOn, nextTags)
+    await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
   }
 
   const deleteSubItem = async (subItem: SubItemRow) => {
@@ -2745,13 +2803,24 @@ function App() {
                 </section>
 
                 <section className="main-section">
-                  <h3>日付</h3>
-                  <input
-                    type="date"
-                    value={mainScheduledOn}
-                    onChange={(event) => void handleMainDateChange(event.target.value)}
-                    disabled={!selectedItemId}
-                  />
+                  <h3>日付（単日 / 範囲）</h3>
+                  <p className="subtle">並び順は開始日基準です。単日の場合は開始日だけ入力してください。</p>
+                  <div className="item-action-row">
+                    <input
+                      type="date"
+                      value={mainScheduledFrom}
+                      onChange={(event) => void handleMainDateFromChange(event.target.value)}
+                      disabled={!selectedItemId}
+                      aria-label="開始日"
+                    />
+                    <input
+                      type="date"
+                      value={mainScheduledTo}
+                      onChange={(event) => void handleMainDateToChange(event.target.value)}
+                      disabled={!selectedItemId}
+                      aria-label="終了日"
+                    />
+                  </div>
                 </section>
 
                 <section className="main-section">

@@ -14,6 +14,8 @@ create table if not exists public.nodes (
   title text not null,
   parent_id uuid null references public.nodes (id) on delete cascade,
   scheduled_on date null,
+  scheduled_from date null,
+  scheduled_to date null,
   tags text[] not null default '{}',
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
@@ -22,9 +24,18 @@ create table if not exists public.nodes (
 alter table if exists public.nodes
   add column if not exists scheduled_on date null;
 alter table if exists public.nodes
+  add column if not exists scheduled_from date null;
+alter table if exists public.nodes
+  add column if not exists scheduled_to date null;
+alter table if exists public.nodes
   add column if not exists tags text[] not null default '{}';
 alter table if exists public.nodes
   add column if not exists sort_order integer not null default 0;
+alter table if exists public.nodes
+  drop constraint if exists nodes_scheduled_range_check;
+alter table if exists public.nodes
+  add constraint nodes_scheduled_range_check
+  check (scheduled_from is null or scheduled_to is null or scheduled_from <= scheduled_to);
 
 create table if not exists public.threads (
   id uuid primary key default gen_random_uuid(),
