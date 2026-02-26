@@ -1779,15 +1779,17 @@ function App() {
                             }
                             return (
                               <article key={`${row.speaker}-${index}`} className="parsed-line-row">
-                                <span className="speaker-avatar">
-                                  {profile?.icon_url ? (
-                                    <img src={profile.icon_url} alt={`${row.speaker} icon`} loading="lazy" />
-                                  ) : (
-                                    <FallbackSpeakerIcon />
-                                  )}
-                                </span>
-                                <div className="parsed-line-content">
-                                  <p className="speaker-name">{row.speaker}</p>
+                                <div className="parsed-speaker-col">
+                                  <span className="speaker-avatar parsed-speaker-avatar">
+                                    {profile?.icon_url ? (
+                                      <img src={profile.icon_url} alt={`${row.speaker} icon`} loading="lazy" />
+                                    ) : (
+                                      <FallbackSpeakerIcon />
+                                    )}
+                                  </span>
+                                  <p className="speaker-name parsed-speaker-name">{row.speaker}</p>
+                                </div>
+                                <div className="parsed-line-content parsed-line-bubble">
                                   <p className="parsed-line-text">{row.content}</p>
                                 </div>
                               </article>

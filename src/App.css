@@ -197,18 +197,19 @@
 
 .parsed-line-row {
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
-  gap: 0.55rem;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 0.75rem;
   align-items: flex-start;
-  border: 1px solid #e5edf3;
-  border-radius: 8px;
-  padding: 0.45rem;
-  background: #fbfdff;
+  padding: 0.25rem 0.1rem;
 }
 
 .parsed-line-row-direction {
   grid-template-columns: 1fr;
-  gap: 0.2rem;
+  gap: 0.25rem;
+  margin-left: 4.4rem;
+  border: 1px solid #dfe8f1;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
   background: #f4f9ff;
 }
 
@@ -223,10 +224,65 @@
   min-width: 0;
 }
 
+.parsed-speaker-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.parsed-speaker-avatar {
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+.parsed-speaker-name {
+  width: 100%;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #5f6f7d;
+  text-align: center;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.parsed-line-bubble {
+  position: relative;
+  border: 1px solid #cad4de;
+  border-radius: 10px;
+  background: #f4f4f4;
+  padding: 0.72rem 0.85rem;
+}
+
+.parsed-line-bubble::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 14px;
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-right: 10px solid #cad4de;
+}
+
+.parsed-line-bubble::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 15px;
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-right: 9px solid #f4f4f4;
+}
+
 .parsed-line-text {
   margin: 0;
   white-space: pre-wrap;
   color: #213546;
+  line-height: 1.45;
 }
 
 .body-page-section .body-editor {
@@ -695,5 +751,18 @@ button:disabled {
 
   .settings-inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .parsed-line-row {
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+  }
+
+  .parsed-line-row-direction {
+    margin-left: 3.4rem;
+  }
+
+  .parsed-speaker-avatar {
+    width: 2.6rem;
+    height: 2.6rem;
   }
 }
