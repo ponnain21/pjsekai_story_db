@@ -772,7 +772,7 @@
 .speaker-dialog-layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(13rem, 16rem) minmax(28rem, 1fr);
+  grid-template-columns: minmax(13rem, 15.5rem) minmax(24rem, 1fr);
   gap: 0.75rem;
 }
 
@@ -936,8 +936,8 @@
 }
 
 .dialog-panel.speaker-dialog-panel {
-  width: min(110rem, calc(100vw - 0.5rem));
-  max-width: none;
+  width: min(86rem, calc(100vw - 1.1rem));
+  max-width: 100%;
   max-height: calc(100vh - 0.7rem);
   overflow: auto;
 }
