@@ -132,6 +132,82 @@ create table if not exists public.body_tag_presets (
 alter table if exists public.body_tag_presets
   add column if not exists sort_order integer not null default 0;
 
+create or replace function public.unique_text_array(values text[])
+returns text[]
+language sql
+immutable
+as $$
+  select coalesce(array_agg(elem order by first_ord), '{}'::text[])
+  from (
+    select elem, min(ord) as first_ord
+    from unnest(coalesce(values, '{}'::text[])) with ordinality as u(elem, ord)
+    where elem is not null and btrim(elem) <> ''
+    group by elem
+  ) dedup
+$$;
+
+create or replace function public.sync_item_tags_from_preset()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.name is distinct from old.name then
+      update public.nodes
+      set tags = public.unique_text_array(array_replace(coalesce(tags, '{}'::text[]), old.name, new.name))
+      where old.name = any(coalesce(tags, '{}'::text[]));
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    update public.nodes
+    set tags = array_remove(coalesce(tags, '{}'::text[]), old.name)
+    where old.name = any(coalesce(tags, '{}'::text[]));
+    return old;
+  end if;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_sync_item_tags_from_preset on public.subitem_tag_presets;
+create trigger trg_sync_item_tags_from_preset
+after update of name or delete on public.subitem_tag_presets
+for each row
+execute function public.sync_item_tags_from_preset();
+
+create or replace function public.sync_episode_tags_from_preset()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.name is distinct from old.name then
+      update public.subitem_episodes
+      set tags = public.unique_text_array(array_replace(coalesce(tags, '{}'::text[]), old.name, new.name))
+      where old.name = any(coalesce(tags, '{}'::text[]));
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    update public.subitem_episodes
+    set tags = array_remove(coalesce(tags, '{}'::text[]), old.name)
+    where old.name = any(coalesce(tags, '{}'::text[]));
+    return old;
+  end if;
+
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_sync_episode_tags_from_preset on public.episode_tag_presets;
+create trigger trg_sync_episode_tags_from_preset
+after update of name or delete on public.episode_tag_presets
+for each row
+execute function public.sync_episode_tags_from_preset();
+
 create table if not exists public.parser_filter_terms (
   id uuid primary key default gen_random_uuid(),
   term text not null unique,
