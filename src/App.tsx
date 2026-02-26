@@ -429,6 +429,7 @@ function App() {
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [episodeSettingsDialog, setEpisodeSettingsDialog] = useState<EpisodeSettingsDialogState | null>(null)
   const [itemSettingsDialog, setItemSettingsDialog] = useState<ItemSettingsDialogState | null>(null)
+  const [speakerSettingsDialogOpen, setSpeakerSettingsDialogOpen] = useState(false)
   const [bodyTagSelection, setBodyTagSelection] = useState<BodyTagSelection | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
@@ -2397,6 +2398,11 @@ function App() {
     setEditingSpeakerProfileId(null)
   }
 
+  const closeSpeakerSettingsDialog = () => {
+    setSpeakerSettingsDialogOpen(false)
+    clearSpeakerProfileDraft()
+  }
+
   const startEditSpeakerProfile = (profile: SpeakerProfileRow) => {
     setEditingSpeakerProfileId(profile.id)
     setSpeakerNameDraft(profile.name)
@@ -2962,81 +2968,11 @@ function App() {
                 話者名で一致した場合にアイコン表示します。吹き出しIDは `[speech_balloon id="..."]` の出力に使います。
               </p>
               <p className="subtle">ID未設定の話者は、話者名「その他」のIDを使って出力します。</p>
-              <form className="stack-form" onSubmit={submitSpeakerProfile}>
-                <div className="settings-inline-form">
-                  <input
-                    value={speakerNameDraft}
-                    onChange={(event) => setSpeakerNameDraft(event.target.value)}
-                    placeholder="話者名"
-                  />
-                  <button type="submit">{editingSpeakerProfileId ? '更新' : '追加'}</button>
-                </div>
-                <input
-                  value={speakerIconUrlDraft}
-                  onChange={(event) => setSpeakerIconUrlDraft(event.target.value)}
-                  placeholder="アイコンURL（任意）"
-                />
-                <input
-                  value={speakerBalloonIdDraft}
-                  onChange={(event) => setSpeakerBalloonIdDraft(event.target.value)}
-                  placeholder="吹き出しID（任意） 例: 28"
-                />
-                <label className="stack-inline-file">
-                  画像ファイルをアップロード（任意）
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => setSpeakerIconFile(event.target.files?.[0] ?? null)}
-                  />
-                </label>
-                <p className="subtle">Storageバケット名は `speaker-icons` を使用します。</p>
-                {editingSpeakerProfileId && (
-                  <button type="button" className="ghost-button" onClick={clearSpeakerProfileDraft}>
-                    編集をキャンセル
-                  </button>
-                )}
-              </form>
-              <div className="speaker-profile-list">
-                {speakerProfiles.length === 0 ? (
-                  <p className="subtle">話者プロフィールはまだありません</p>
-                ) : (
-                  speakerProfiles.map((profile) => (
-                    <article key={profile.id} className="speaker-profile-row">
-                      <button type="button" className="speaker-profile-main" onClick={() => startEditSpeakerProfile(profile)}>
-                        <span className="speaker-avatar">
-                          {profile.icon_url ? (
-                            <img src={profile.icon_url} alt={`${profile.name} icon`} loading="lazy" />
-                          ) : (
-                            <FallbackSpeakerIcon />
-                          )}
-                        </span>
-                        <span className="speaker-profile-text">
-                          <span className="speaker-name">{profile.name}</span>
-                          <span className="subtle">
-                            吹き出しID: {profile.speech_balloon_id ? profile.speech_balloon_id : '未設定'}
-                          </span>
-                          <span className="subtle">{profile.icon_url ? profile.icon_url : 'アイコン未設定'}</span>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="danger-button mini-action"
-                        onClick={() =>
-                          openConfirmDialog({
-                            title: '話者プロフィールの削除',
-                            message: `「${profile.name}」を削除します。`,
-                            confirmLabel: '削除する',
-                            onConfirm: async () => {
-                              await deleteSpeakerProfile(profile)
-                            },
-                          })
-                        }
-                      >
-                        削除
-                      </button>
-                    </article>
-                  ))
-                )}
+              <div className="speaker-settings-summary">
+                <p className="subtle">登録済み: {speakerProfiles.length}件</p>
+                <button type="button" className="ghost-button" onClick={() => setSpeakerSettingsDialogOpen(true)}>
+                  話者一覧を開く
+                </button>
               </div>
             </section>
 
@@ -3883,6 +3819,114 @@ function App() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {speakerSettingsDialogOpen && (
+        <div className="overlay overlay-priority">
+          <section className="dialog-panel speaker-dialog-panel">
+            <div className="speaker-dialog-head">
+              <h2>話者一覧・編集</h2>
+              <p className="subtle">一覧から選択して、名前・吹き出しID・アイコンをいつでも変更できます。</p>
+            </div>
+
+            <div className="speaker-dialog-layout">
+              <form className="stack-form speaker-dialog-form" onSubmit={submitSpeakerProfile}>
+                <div className="settings-inline-form">
+                  <input
+                    value={speakerNameDraft}
+                    onChange={(event) => setSpeakerNameDraft(event.target.value)}
+                    placeholder="話者名"
+                  />
+                  <button type="submit">{editingSpeakerProfileId ? '更新' : '追加'}</button>
+                </div>
+                <input
+                  value={speakerIconUrlDraft}
+                  onChange={(event) => setSpeakerIconUrlDraft(event.target.value)}
+                  placeholder="アイコンURL（任意）"
+                />
+                <input
+                  value={speakerBalloonIdDraft}
+                  onChange={(event) => setSpeakerBalloonIdDraft(event.target.value)}
+                  placeholder="吹き出しID（任意） 例: 28"
+                />
+                <label className="stack-inline-file">
+                  画像ファイルをアップロード（任意）
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => setSpeakerIconFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p className="subtle">Storageバケット名は `speaker-icons` を使用します。</p>
+                {editingSpeakerProfileId && (
+                  <button type="button" className="ghost-button" onClick={clearSpeakerProfileDraft}>
+                    編集をキャンセル
+                  </button>
+                )}
+              </form>
+
+              <div className="speaker-dialog-list-wrap">
+                <div className="speaker-dialog-list-head">
+                  <p className="subtle">登録済み話者</p>
+                  <button type="button" className="ghost-button mini-action" onClick={clearSpeakerProfileDraft}>
+                    新規追加
+                  </button>
+                </div>
+                <div className="speaker-profile-list speaker-dialog-list">
+                  {speakerProfiles.length === 0 ? (
+                    <p className="subtle">話者プロフィールはまだありません</p>
+                  ) : (
+                    speakerProfiles.map((profile) => (
+                      <article
+                        key={profile.id}
+                        className={`speaker-profile-row ${editingSpeakerProfileId === profile.id ? 'active' : ''}`}
+                      >
+                        <button type="button" className="speaker-profile-main" onClick={() => startEditSpeakerProfile(profile)}>
+                          <span className="speaker-avatar">
+                            {profile.icon_url ? (
+                              <img src={profile.icon_url} alt={`${profile.name} icon`} loading="lazy" />
+                            ) : (
+                              <FallbackSpeakerIcon />
+                            )}
+                          </span>
+                          <span className="speaker-profile-text">
+                            <span className="speaker-name">{profile.name}</span>
+                            <span className="subtle">
+                              吹き出しID: {profile.speech_balloon_id ? profile.speech_balloon_id : '未設定'}
+                            </span>
+                            <span className="subtle">{profile.icon_url ? profile.icon_url : 'アイコン未設定'}</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="danger-button mini-action"
+                          onClick={() =>
+                            openConfirmDialog({
+                              title: '話者プロフィールの削除',
+                              message: `「${profile.name}」を削除します。`,
+                              confirmLabel: '削除する',
+                              onConfirm: async () => {
+                                await deleteSpeakerProfile(profile)
+                              },
+                            })
+                          }
+                        >
+                          削除
+                        </button>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="dialog-actions">
+              <button type="button" className="ghost-button" onClick={closeSpeakerSettingsDialog}>
+                閉じる
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
