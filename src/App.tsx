@@ -3259,6 +3259,20 @@ function App() {
                       aria-label="終了日"
                     />
                   </div>
+                  <div className="date-tag-preview">
+                    <p className="subtle">現在の項目タグ</p>
+                    {mainSelectedTags.length === 0 ? (
+                      <p className="subtle">タグなし</p>
+                    ) : (
+                      <div className="date-tag-list">
+                        {mainSelectedTags.map((tagName) => (
+                          <span key={tagName} className="tag-chip">
+                            {tagName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </section>
 
               </>

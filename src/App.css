@@ -839,6 +839,19 @@
   gap: 0.5rem;
 }
 
+.date-tag-preview {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.date-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .subtle {
   color: #5a6a77;
   margin: 0;
