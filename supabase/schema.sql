@@ -158,7 +158,7 @@ alter table if exists public.body_tag_annotations
     or (thread_id is null and episode_id is not null)
   );
 
-create or replace function public.unique_text_array(values text[])
+create or replace function public.unique_text_array(input_values text[])
 returns text[]
 language sql
 immutable
@@ -166,7 +166,7 @@ as $$
   select coalesce(array_agg(elem order by first_ord), '{}'::text[])
   from (
     select elem, min(ord) as first_ord
-    from unnest(coalesce(values, '{}'::text[])) with ordinality as u(elem, ord)
+    from unnest(coalesce(input_values, '{}'::text[])) with ordinality as u(elem, ord)
     where elem is not null and btrim(elem) <> ''
     group by elem
   ) dedup
