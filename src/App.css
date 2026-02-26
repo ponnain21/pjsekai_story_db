@@ -297,6 +297,12 @@
   color: #4c6477;
 }
 
+.parsed-rule-badge.location {
+  border-color: #9fcbb3;
+  background: #edf8f1;
+  color: #2f6b49;
+}
+
 .parsed-line-bubble {
   position: relative;
   border: 1px solid #cad4de;
@@ -536,6 +542,12 @@
   border-color: #b9cbdc;
   background: #f1f5f8;
   color: #4c6477;
+}
+
+.settings-rule-kind.location {
+  border-color: #9fcbb3;
+  background: #edf8f1;
+  color: #2f6b49;
 }
 
 .settings-rule-line {

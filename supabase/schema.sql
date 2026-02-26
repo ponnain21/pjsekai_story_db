@@ -93,9 +93,15 @@ create table if not exists public.parser_filter_terms (
 create table if not exists public.parser_line_classifications (
   id uuid primary key default gen_random_uuid(),
   line_text text not null unique,
-  classification text not null check (classification in ('speaker', 'direction')),
+  classification text not null check (classification in ('speaker', 'direction', 'location')),
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.parser_line_classifications
+  drop constraint if exists parser_line_classifications_classification_check;
+alter table if exists public.parser_line_classifications
+  add constraint parser_line_classifications_classification_check
+  check (classification in ('speaker', 'direction', 'location'));
 
 create table if not exists public.speaker_profiles (
   id uuid primary key default gen_random_uuid(),

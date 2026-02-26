@@ -54,10 +54,14 @@ type FilterTermRow = {
   created_at: string
 }
 
+type LineClassification = 'speaker' | 'direction' | 'location'
+type NonDialogueClassification = Exclude<LineClassification, 'speaker'>
+type ParsedLineKind = 'dialogue' | NonDialogueClassification
+
 type ParserLineRuleRow = {
   id: string
   line_text: string
-  classification: 'speaker' | 'direction'
+  classification: LineClassification
   created_at: string
 }
 
@@ -80,8 +84,8 @@ type ParserHistoryAction =
   | {
       kind: 'set_line_rule'
       lineText: string
-      beforeClassification: 'speaker' | 'direction' | null
-      afterClassification: 'speaker' | 'direction' | null
+      beforeClassification: LineClassification | null
+      afterClassification: LineClassification | null
       reparse: boolean
     }
   | {
@@ -91,11 +95,11 @@ type ParserHistoryAction =
     }
 
 type ParsedLineRow = {
-  kind: 'dialogue' | 'direction'
+  kind: ParsedLineKind
   speaker: string
   content: string
   sourceLine: string
-  sourceRule: 'speaker' | 'direction' | null
+  sourceRule: LineClassification | null
 }
 
 type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag'
@@ -119,9 +123,15 @@ const isMissingRelationError = (message: string) =>
   message.includes('relation') && message.includes('does not exist')
 
 const getLineRule = (
-  lineRuleMap: Map<string, 'speaker' | 'direction'>,
+  lineRuleMap: Map<string, LineClassification>,
   line: string,
-): 'speaker' | 'direction' | null => lineRuleMap.get(line) ?? null
+): LineClassification | null => lineRuleMap.get(line) ?? null
+
+const isNonDialogueClassification = (classification: LineClassification | null): classification is NonDialogueClassification =>
+  classification === 'direction' || classification === 'location'
+
+const toRuleLabel = (classification: LineClassification) =>
+  classification === 'speaker' ? '話者' : classification === 'direction' ? '演出' : '場所'
 
 const splitAndFilterLines = (rawText: string, blockedTerms: Set<string>) => {
   const normalizedLines = rawText
@@ -174,7 +184,7 @@ const splitSpeakerAndDialogueFromSingleLine = (line: string) => {
 }
 
 const formatParsedRowsToBody = (rows: ParsedLineRow[]) =>
-  rows.map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`)).join('\n\n')
+  rows.map((row) => (row.kind === 'dialogue' ? `${row.speaker}\n${row.content}` : row.content)).join('\n\n')
 
 const isEditableTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) return false
@@ -186,7 +196,7 @@ const isEditableTarget = (target: EventTarget | null) => {
 const parseScriptLines = (
   rawText: string,
   blockedTerms: string[],
-  lineRuleMap: Map<string, 'speaker' | 'direction'>,
+  lineRuleMap: Map<string, LineClassification>,
   speakerNames: string[],
 ) => {
   const blockedSet = new Set(blockedTerms.map((term) => term.trim()).filter(Boolean))
@@ -203,9 +213,9 @@ const parseScriptLines = (
     const lineIsForcedSpeaker = lineRule === 'speaker'
     const nextIsForcedSpeaker = nextRule === 'speaker'
 
-    if (lineRule === 'direction') {
+    if (isNonDialogueClassification(lineRule)) {
       rows.push({
-        kind: 'direction',
+        kind: lineRule,
         speaker: '',
         content: line,
         sourceLine: line,
@@ -215,7 +225,7 @@ const parseScriptLines = (
       continue
     }
 
-    if ((lineIsKnownSpeaker || lineIsForcedSpeaker) && nextLine && nextRule !== 'direction') {
+    if ((lineIsKnownSpeaker || lineIsForcedSpeaker) && nextLine && !isNonDialogueClassification(nextRule)) {
       rows.push({
         kind: 'dialogue',
         speaker: line,
@@ -239,7 +249,7 @@ const parseScriptLines = (
       continue
     }
 
-    if (nextLine && nextRule !== 'direction') {
+    if (nextLine && !isNonDialogueClassification(nextRule)) {
       rows.push({
         kind: 'dialogue',
         speaker: line,
@@ -1745,7 +1755,7 @@ function App() {
   }
 
   const applyParserResult = (
-    ruleMap: Map<string, 'speaker' | 'direction'>,
+    ruleMap: Map<string, LineClassification>,
     blockedTermsOverride?: string[],
   ) => {
     const parsed = parseScriptLines(
@@ -1870,7 +1880,7 @@ function App() {
     }
   }
 
-  const upsertLineRule = async (lineText: string, classification: 'speaker' | 'direction') => {
+  const upsertLineRule = async (lineText: string, classification: LineClassification) => {
     const trimmed = lineText.trim()
     if (!trimmed) return
     await commitParserHistoryAction({
@@ -2110,7 +2120,7 @@ function App() {
 
             <section className="settings-section">
               <h3>判定学習ルール</h3>
-              <p className="subtle">本文プレビューで学習した話者/演出判定です。不要なら削除できます。</p>
+              <p className="subtle">本文プレビューで学習した話者/演出/場所の判定です。不要なら削除できます。</p>
               <div className="settings-rule-list">
                 {lineRules.length === 0 ? (
                   <p className="subtle">学習ルールはまだありません</p>
@@ -2118,13 +2128,7 @@ function App() {
                   lineRules.map((rule) => (
                     <article key={rule.id} className="settings-rule-row">
                       <p className="settings-rule-text">
-                        <span
-                          className={`settings-rule-kind ${
-                            rule.classification === 'speaker' ? 'speaker' : 'direction'
-                          }`}
-                        >
-                          {rule.classification === 'speaker' ? '話者' : '演出'}
-                        </span>
+                        <span className={`settings-rule-kind ${rule.classification}`}>{toRuleLabel(rule.classification)}</span>
                         <span className="settings-rule-line">{rule.line_text}</span>
                       </p>
                       <button
@@ -2395,21 +2399,15 @@ function App() {
                           {parsedLines.map((row, index) => {
                             const profile = speakerProfiles.find((speaker) => speaker.name === row.speaker) ?? null
                             const sourceRuleEntry = lineRuleEntryMap.get(row.sourceLine) ?? null
-                            if (row.kind === 'direction') {
+                            if (row.kind !== 'dialogue') {
                               return (
-                                <article key={`direction-${index}`} className="parsed-line-row parsed-line-row-direction">
+                                <article key={`${row.kind}-${index}`} className="parsed-line-row parsed-line-row-direction">
                                   <div className="parsed-direction-head">
                                     <div className="parsed-row-meta">
-                                      <p className="parsed-direction-label">演出</p>
+                                      <p className="parsed-direction-label">{row.kind === 'location' ? '場所' : '演出'}</p>
                                       {sourceRuleEntry && (
-                                        <span
-                                          className={`parsed-rule-badge ${
-                                            sourceRuleEntry.classification === 'speaker'
-                                              ? 'speaker'
-                                              : 'direction'
-                                          }`}
-                                        >
-                                          学習: {sourceRuleEntry.classification === 'speaker' ? '話者' : '演出'}
+                                        <span className={`parsed-rule-badge ${sourceRuleEntry.classification}`}>
+                                          学習: {toRuleLabel(sourceRuleEntry.classification)}
                                         </span>
                                       )}
                                     </div>
@@ -2427,6 +2425,13 @@ function App() {
                                         onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
                                       >
                                         演出に学習
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="ghost-button parsed-row-action"
+                                        onClick={() => void upsertLineRule(row.sourceLine, 'location')}
+                                      >
+                                        場所に学習
                                       </button>
                                       <button
                                         type="button"
@@ -2471,12 +2476,8 @@ function App() {
                                   </span>
                                   <p className="speaker-name parsed-speaker-name">{row.speaker}</p>
                                   {sourceRuleEntry && (
-                                    <span
-                                      className={`parsed-rule-badge ${
-                                        sourceRuleEntry.classification === 'speaker' ? 'speaker' : 'direction'
-                                      }`}
-                                    >
-                                      学習: {sourceRuleEntry.classification === 'speaker' ? '話者' : '演出'}
+                                    <span className={`parsed-rule-badge ${sourceRuleEntry.classification}`}>
+                                      学習: {toRuleLabel(sourceRuleEntry.classification)}
                                     </span>
                                   )}
                                 </div>
@@ -2498,6 +2499,13 @@ function App() {
                                       onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
                                     >
                                       演出に学習
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost-button parsed-row-action"
+                                      onClick={() => void upsertLineRule(row.sourceLine, 'location')}
+                                    >
+                                      場所に学習
                                     </button>
                                     <button
                                       type="button"
