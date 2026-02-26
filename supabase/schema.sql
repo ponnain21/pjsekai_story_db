@@ -132,6 +132,32 @@ create table if not exists public.body_tag_presets (
 alter table if exists public.body_tag_presets
   add column if not exists sort_order integer not null default 0;
 
+create table if not exists public.body_tag_annotations (
+  id uuid primary key default gen_random_uuid(),
+  tag_id uuid not null references public.body_tag_presets (id) on delete cascade,
+  thread_id uuid null references public.threads (id) on delete cascade,
+  episode_id uuid null references public.subitem_episodes (id) on delete cascade,
+  start_offset integer not null check (start_offset >= 0),
+  end_offset integer not null check (end_offset > start_offset),
+  selected_text text not null default '',
+  created_at timestamptz not null default now(),
+  constraint body_tag_annotations_target_check check (
+    (thread_id is not null and episode_id is null)
+    or (thread_id is null and episode_id is not null)
+  )
+);
+
+alter table if exists public.body_tag_annotations
+  add column if not exists selected_text text not null default '';
+alter table if exists public.body_tag_annotations
+  drop constraint if exists body_tag_annotations_target_check;
+alter table if exists public.body_tag_annotations
+  add constraint body_tag_annotations_target_check
+  check (
+    (thread_id is not null and episode_id is null)
+    or (thread_id is null and episode_id is not null)
+  );
+
 create or replace function public.unique_text_array(values text[])
 returns text[]
 language sql
@@ -258,6 +284,10 @@ create index if not exists idx_subitem_templates_sort_order on public.subitem_te
 create index if not exists idx_subitem_tag_presets_sort_order on public.subitem_tag_presets (sort_order);
 create index if not exists idx_episode_tag_presets_sort_order on public.episode_tag_presets (sort_order);
 create index if not exists idx_body_tag_presets_sort_order on public.body_tag_presets (sort_order);
+create index if not exists idx_body_tag_annotations_thread_id on public.body_tag_annotations (thread_id);
+create index if not exists idx_body_tag_annotations_episode_id on public.body_tag_annotations (episode_id);
+create index if not exists idx_body_tag_annotations_tag_id on public.body_tag_annotations (tag_id);
+create index if not exists idx_body_tag_annotations_range on public.body_tag_annotations (start_offset, end_offset);
 create index if not exists idx_parser_filter_terms_term on public.parser_filter_terms (term);
 create index if not exists idx_parser_line_classifications_line_text on public.parser_line_classifications (line_text);
 create index if not exists idx_speaker_profiles_name on public.speaker_profiles (name);

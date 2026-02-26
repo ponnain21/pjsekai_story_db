@@ -35,7 +35,7 @@ on conflict (email) do nothing;
 ```
 
 ※ 未登録メールはログイン後すぐに弾かれ、データアクセスも RLS で拒否されます。
-※ 既存プロジェクトを更新する場合も `supabase/schema.sql` と `supabase/rls.sql` を再実行してください（`nodes` の `scheduled_from` / `scheduled_to`、`threads` の `has_episodes` / `episode_number_start` / `episode_labels`、`subitem_episodes` の `label` / `tags`、`subitem_templates` / `subitem_tag_presets` / `episode_tag_presets` / `body_tag_presets`、`speaker_profiles.speech_balloon_id` などを揃えます）。タグプリセット名の変更/削除時はトリガーで既存データ側タグも自動追従します。
+※ 既存プロジェクトを更新する場合も `supabase/schema.sql` と `supabase/rls.sql` を再実行してください（`nodes` の `scheduled_from` / `scheduled_to`、`threads` の `has_episodes` / `episode_number_start` / `episode_labels`、`subitem_episodes` の `label` / `tags`、`subitem_templates` / `subitem_tag_presets` / `episode_tag_presets` / `body_tag_presets` / `body_tag_annotations`、`speaker_profiles.speech_balloon_id` などを揃えます）。タグプリセット名の変更/削除時はトリガーで既存データ側タグも自動追従します。
 
 ## 3. アプリ起動
 

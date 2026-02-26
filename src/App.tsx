@@ -68,6 +68,17 @@ type BodyTagPresetRow = {
   created_at: string
 }
 
+type BodyTagAnnotationRow = {
+  id: string
+  tag_id: string
+  thread_id: string | null
+  episode_id: string | null
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  created_at: string
+}
+
 type FilterTermRow = {
   id: string
   term: string
@@ -147,6 +158,33 @@ type ItemSettingsDialogState = {
   selectedTags: string[]
   selectedTemplateIds: string[]
 }
+
+type BodyTagSelection = {
+  start: number
+  end: number
+  selectedText: string
+}
+
+type BodyTagRangeGroup = {
+  key: string
+  start: number
+  end: number
+  text: string
+  annotations: BodyTagAnnotationRow[]
+}
+
+type BodyTagPreviewSegment =
+  | {
+      kind: 'plain'
+      key: string
+      text: string
+    }
+  | {
+      kind: 'tagged'
+      key: string
+      text: string
+      group: BodyTagRangeGroup
+    }
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
 
@@ -357,6 +395,7 @@ function App() {
   const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
   const [episodeTagPresets, setEpisodeTagPresets] = useState<EpisodeTagPresetRow[]>([])
   const [bodyTagPresets, setBodyTagPresets] = useState<BodyTagPresetRow[]>([])
+  const [bodyTagAnnotations, setBodyTagAnnotations] = useState<BodyTagAnnotationRow[]>([])
   const [filterTerms, setFilterTerms] = useState<FilterTermRow[]>([])
   const [lineRules, setLineRules] = useState<ParserLineRuleRow[]>([])
   const [speakerProfiles, setSpeakerProfiles] = useState<SpeakerProfileRow[]>([])
@@ -390,6 +429,7 @@ function App() {
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [episodeSettingsDialog, setEpisodeSettingsDialog] = useState<EpisodeSettingsDialogState | null>(null)
   const [itemSettingsDialog, setItemSettingsDialog] = useState<ItemSettingsDialogState | null>(null)
+  const [bodyTagSelection, setBodyTagSelection] = useState<BodyTagSelection | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dragState, setDragState] = useState<{ kind: SortableKind; id: string } | null>(null)
@@ -402,10 +442,81 @@ function App() {
     () => new Map(lineRules.map((rule) => [rule.line_text, rule])),
     [lineRules],
   )
+  const bodyTagPresetMap = useMemo(
+    () => new Map(bodyTagPresets.map((tag) => [tag.id, tag.name])),
+    [bodyTagPresets],
+  )
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
   const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId) ?? null
+  const bodyTagTarget = useMemo(() => {
+    if (!selectedSubItem) return null
+    if (!selectedSubItem.has_episodes) return { threadId: selectedSubItem.id as string | null, episodeId: null as string | null }
+    if (!selectedEpisode) return null
+    return { threadId: null as string | null, episodeId: selectedEpisode.id as string | null }
+  }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedEpisode?.id])
+  const bodyTagGroups = useMemo<BodyTagRangeGroup[]>(() => {
+    if (!subItemBodyDraft || bodyTagAnnotations.length === 0) return []
+    const normalized = bodyTagAnnotations
+      .filter((row) => row.start_offset >= 0 && row.end_offset > row.start_offset && row.end_offset <= subItemBodyDraft.length)
+      .map((row) => ({ ...row }))
+      .sort((a, b) => (a.start_offset - b.start_offset) || (a.end_offset - b.end_offset) || a.created_at.localeCompare(b.created_at))
+
+    const groups: BodyTagRangeGroup[] = []
+    for (const row of normalized) {
+      const key = `${row.start_offset}-${row.end_offset}`
+      const existing = groups.find((group) => group.key === key) ?? null
+      if (existing) {
+        existing.annotations.push(row)
+        continue
+      }
+
+      const text = subItemBodyDraft.slice(row.start_offset, row.end_offset)
+      groups.push({
+        key,
+        start: row.start_offset,
+        end: row.end_offset,
+        text,
+        annotations: [row],
+      })
+    }
+    return groups
+  }, [bodyTagAnnotations, subItemBodyDraft])
+  const bodyTagPreviewSegments = useMemo<BodyTagPreviewSegment[]>(() => {
+    if (!subItemBodyDraft) return []
+    if (bodyTagGroups.length === 0) {
+      return [{ kind: 'plain', key: 'plain-all', text: subItemBodyDraft }]
+    }
+
+    const segments: BodyTagPreviewSegment[] = []
+    let cursor = 0
+    for (const group of bodyTagGroups) {
+      if (group.start < cursor) continue
+      if (cursor < group.start) {
+        segments.push({
+          kind: 'plain',
+          key: `plain-${cursor}-${group.start}`,
+          text: subItemBodyDraft.slice(cursor, group.start),
+        })
+      }
+      segments.push({
+        kind: 'tagged',
+        key: `tag-${group.key}`,
+        text: subItemBodyDraft.slice(group.start, group.end),
+        group,
+      })
+      cursor = group.end
+    }
+    if (cursor < subItemBodyDraft.length) {
+      segments.push({
+        kind: 'plain',
+        key: `plain-${cursor}-${subItemBodyDraft.length}`,
+        text: subItemBodyDraft.slice(cursor),
+      })
+    }
+    return segments
+  }, [bodyTagGroups, subItemBodyDraft])
 
   useEffect(() => {
     const fallbackDate = selectedItem?.scheduled_on ?? ''
@@ -423,6 +534,7 @@ function App() {
   useEffect(() => {
     if (selectedSubItem?.has_episodes) {
       setSubItemBodyDraft(selectedEpisode?.body ?? '')
+      setBodyTagSelection(null)
       setParsedLines([])
       setBalloonExportText('')
       setParserUndoStack([])
@@ -430,6 +542,7 @@ function App() {
       return
     }
     setSubItemBodyDraft(selectedSubItem?.body ?? '')
+    setBodyTagSelection(null)
     setParsedLines([])
     setBalloonExportText('')
     setParserUndoStack([])
@@ -824,6 +937,32 @@ function App() {
     applyLoadedTags((data ?? []) as BodyTagPresetRow[])
   }
 
+  const loadBodyTagAnnotations = async (target: { threadId: string | null; episodeId: string | null }) => {
+    const baseQuery = supabase
+      .from('body_tag_annotations')
+      .select('id, tag_id, thread_id, episode_id, start_offset, end_offset, selected_text, created_at')
+      .order('start_offset', { ascending: true })
+      .order('end_offset', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    const query =
+      target.episodeId
+        ? baseQuery.eq('episode_id', target.episodeId).is('thread_id', null)
+        : baseQuery.eq('thread_id', target.threadId).is('episode_id', null)
+
+    const { data, error: loadError } = await query
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setBodyTagAnnotations([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    setBodyTagAnnotations((data ?? []) as BodyTagAnnotationRow[])
+  }
+
   const loadFilterTerms = async () => {
     const { data, error: loadError } = await supabase
       .from('parser_filter_terms')
@@ -904,6 +1043,7 @@ function App() {
       setTagPresets([])
       setEpisodeTagPresets([])
       setBodyTagPresets([])
+      setBodyTagAnnotations([])
       setFilterTerms([])
       setLineRules([])
       setSpeakerProfiles([])
@@ -919,6 +1059,7 @@ function App() {
       setBalloonExportText('')
       setParserUndoStack([])
       setParserRedoStack([])
+      setBodyTagSelection(null)
       return
     }
     void loadItems()
@@ -950,6 +1091,14 @@ function App() {
     }
     void loadEpisodes(selectedSubItemId)
   }, [selectedSubItemId, selectedSubItem?.has_episodes])
+
+  useEffect(() => {
+    if (pageMode !== 'subitemBody' || !bodyTagTarget) {
+      setBodyTagAnnotations([])
+      return
+    }
+    void loadBodyTagAnnotations(bodyTagTarget)
+  }, [pageMode, bodyTagTarget?.threadId, bodyTagTarget?.episodeId])
 
   useEffect(() => {
     if (pageMode !== 'subitemBody' || !selectedSubItem) {
@@ -1571,6 +1720,7 @@ function App() {
           return
         }
         await loadBodyTagPresets()
+        setBodyTagAnnotations((current) => current.filter((row) => row.tag_id !== bodyTag.id))
         setPresetDialog(null)
       },
     })
@@ -1941,6 +2091,77 @@ function App() {
     }
 
     if (selectedItemId) await loadSubItems(selectedItemId)
+  }
+
+  const handleBodySelection = (start: number, end: number) => {
+    if (end <= start) {
+      setBodyTagSelection(null)
+      return
+    }
+    const selectedText = subItemBodyDraft.slice(start, end)
+    if (!selectedText.trim()) {
+      setBodyTagSelection(null)
+      return
+    }
+    setBodyTagSelection({ start, end, selectedText })
+  }
+
+  const addBodyTagToSelection = async (tagId: string) => {
+    if (!bodyTagTarget || !bodyTagSelection) return
+    setError('')
+
+    const { start, end, selectedText } = bodyTagSelection
+    const hasOverlapConflict = bodyTagAnnotations.some(
+      (row) =>
+        row.start_offset < end &&
+        start < row.end_offset &&
+        !(row.start_offset === start && row.end_offset === end),
+    )
+    if (hasOverlapConflict) {
+      setError('重なる本文タグ範囲があります。同じ範囲で付与するか、既存タグを削除してください。')
+      return
+    }
+
+    const duplicate = bodyTagAnnotations.some(
+      (row) => row.tag_id === tagId && row.start_offset === start && row.end_offset === end,
+    )
+    if (duplicate) return
+
+    const payload = {
+      tag_id: tagId,
+      thread_id: bodyTagTarget.threadId,
+      episode_id: bodyTagTarget.episodeId,
+      start_offset: start,
+      end_offset: end,
+      selected_text: selectedText,
+    }
+    const { data, error: insertError } = await supabase
+      .from('body_tag_annotations')
+      .insert(payload)
+      .select('id, tag_id, thread_id, episode_id, start_offset, end_offset, selected_text, created_at')
+      .single()
+
+    if (insertError) {
+      if (isMissingRelationError(insertError.message)) {
+        setError('body_tag_annotations テーブルが必要です。supabase/schema.sql と supabase/rls.sql を実行してください。')
+      } else {
+        setError(insertError.message)
+      }
+      return
+    }
+
+    const inserted = data as BodyTagAnnotationRow
+    setBodyTagAnnotations((current) => [...current, inserted])
+    setBodyTagSelection(null)
+  }
+
+  const deleteBodyTagAnnotation = async (annotationId: string) => {
+    const { error: deleteError } = await supabase.from('body_tag_annotations').delete().eq('id', annotationId)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+    setBodyTagAnnotations((current) => current.filter((row) => row.id !== annotationId))
   }
 
   const isParserHistoryActionNoop = (action: ParserHistoryAction) => {
@@ -2974,11 +3195,68 @@ function App() {
                         value={subItemBodyDraft}
                         onChange={(event) => {
                           setSubItemBodyDraft(event.target.value)
+                          setBodyTagSelection(null)
                           setBalloonExportText('')
                         }}
+                        onSelect={(event) =>
+                          handleBodySelection(event.currentTarget.selectionStart, event.currentTarget.selectionEnd)
+                        }
                         placeholder={selectedSubItem.has_episodes ? '選択した話の本文を入力' : 'ここに本文を入力'}
                         disabled={selectedSubItem.has_episodes && !selectedEpisode}
                       />
+                      <section className="body-tag-section">
+                        <p className="subtle">本文で範囲選択してタグを付与できます（付与済みは下のプレビューでホバー確認・削除）</p>
+                        {bodyTagSelection ? (
+                          <p className="body-tag-selection-text">
+                            選択中: {bodyTagSelection.selectedText.length > 80 ? `${bodyTagSelection.selectedText.slice(0, 80)}...` : bodyTagSelection.selectedText}
+                          </p>
+                        ) : (
+                          <p className="subtle">未選択</p>
+                        )}
+                        <div className="template-button-list">
+                          {bodyTagPresets.length === 0 ? (
+                            <p className="subtle">本文タグプリセットがありません（設定ページで作成してください）</p>
+                          ) : (
+                            bodyTagPresets.map((tag) => (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                className="ghost-button template-button"
+                                onClick={() => void addBodyTagToSelection(tag.id)}
+                                disabled={!bodyTagSelection || (selectedSubItem.has_episodes && !selectedEpisode)}
+                              >
+                                {tag.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                        {subItemBodyDraft && (
+                          <div className="body-tag-preview" aria-label="本文タグプレビュー">
+                            {bodyTagPreviewSegments.map((segment) => {
+                              if (segment.kind === 'plain') {
+                                return <span key={segment.key}>{segment.text}</span>
+                              }
+                              return (
+                                <span key={segment.key} className="body-tag-mark">
+                                  {segment.text}
+                                  <span className="body-tag-hover-card">
+                                    {segment.group.annotations.map((annotation) => (
+                                      <button
+                                        key={annotation.id}
+                                        type="button"
+                                        className="body-tag-hover-chip"
+                                        onClick={() => void deleteBodyTagAnnotation(annotation.id)}
+                                      >
+                                        {(bodyTagPresetMap.get(annotation.tag_id) ?? '削除済みタグ')} ×
+                                      </button>
+                                    ))}
+                                  </span>
+                                </span>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </section>
                       <div className="body-editor-actions">
                         <button
                           type="button"

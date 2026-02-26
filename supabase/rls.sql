@@ -10,6 +10,7 @@ alter table if exists public.subitem_templates enable row level security;
 alter table if exists public.subitem_tag_presets enable row level security;
 alter table if exists public.episode_tag_presets enable row level security;
 alter table if exists public.body_tag_presets enable row level security;
+alter table if exists public.body_tag_annotations enable row level security;
 alter table if exists public.parser_filter_terms enable row level security;
 alter table if exists public.parser_line_classifications enable row level security;
 alter table if exists public.speaker_profiles enable row level security;
@@ -457,6 +458,61 @@ with check (
 drop policy if exists "body_tag_presets_delete_allowlisted" on public.body_tag_presets;
 create policy "body_tag_presets_delete_allowlisted"
 on public.body_tag_presets for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_annotations_select_allowlisted" on public.body_tag_annotations;
+create policy "body_tag_annotations_select_allowlisted"
+on public.body_tag_annotations for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_annotations_insert_allowlisted" on public.body_tag_annotations;
+create policy "body_tag_annotations_insert_allowlisted"
+on public.body_tag_annotations for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_annotations_update_allowlisted" on public.body_tag_annotations;
+create policy "body_tag_annotations_update_allowlisted"
+on public.body_tag_annotations for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_annotations_delete_allowlisted" on public.body_tag_annotations;
+create policy "body_tag_annotations_delete_allowlisted"
+on public.body_tag_annotations for delete
 to authenticated
 using (
   exists (

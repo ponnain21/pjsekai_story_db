@@ -217,6 +217,77 @@
   justify-content: flex-end;
 }
 
+.body-tag-section {
+  border: 1px solid #dce6ee;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.body-tag-selection-text {
+  margin: 0;
+  color: #22313f;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body-tag-preview {
+  border: 1px solid #d9e4ec;
+  border-radius: 8px;
+  background: #f9fcfe;
+  padding: 0.55rem 0.65rem;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.body-tag-mark {
+  position: relative;
+  background: #fff1d8;
+  border-bottom: 1px dashed #d79d3a;
+  border-radius: 3px;
+}
+
+.body-tag-hover-card {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px solid #d2dde6;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgb(20 33 43 / 16%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  min-width: max-content;
+}
+
+.body-tag-mark:hover .body-tag-hover-card,
+.body-tag-mark:focus-within .body-tag-hover-card {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.body-tag-hover-chip {
+  border: 1px solid #d6e2ea;
+  background: #ffffff;
+  color: #304455;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 1.1;
+  padding: 0.16rem 0.45rem;
+}
+
 .body-editor-actions {
   display: flex;
   justify-content: flex-end;
