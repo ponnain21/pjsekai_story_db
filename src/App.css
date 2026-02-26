@@ -124,6 +124,13 @@
   gap: 0.25rem;
 }
 
+.content-head-with-action {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
 .body-page-head {
   flex-direction: row;
   align-items: flex-start;
@@ -907,6 +914,11 @@ button:disabled {
   }
 
   .body-page-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .content-head-with-action {
     flex-direction: column;
     align-items: stretch;
   }

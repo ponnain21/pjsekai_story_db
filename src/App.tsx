@@ -143,6 +143,11 @@ type EpisodeSettingsDialogState = {
   selectedTags: string[]
 }
 
+type ItemSettingsDialogState = {
+  selectedTags: string[]
+  selectedTemplateIds: string[]
+}
+
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
 
 const isMissingRelationError = (message: string) =>
@@ -369,7 +374,6 @@ function App() {
   const [mainScheduledFrom, setMainScheduledFrom] = useState('')
   const [mainScheduledTo, setMainScheduledTo] = useState('')
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
-  const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [episodeTitle, setEpisodeTitle] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
   const [filterTermDraft, setFilterTermDraft] = useState('')
@@ -385,6 +389,7 @@ function App() {
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [episodeSettingsDialog, setEpisodeSettingsDialog] = useState<EpisodeSettingsDialogState | null>(null)
+  const [itemSettingsDialog, setItemSettingsDialog] = useState<ItemSettingsDialogState | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dragState, setDragState] = useState<{ kind: SortableKind; id: string } | null>(null)
@@ -436,6 +441,10 @@ function App() {
       setPageMode('main')
     }
   }, [pageMode, selectedSubItemId])
+
+  useEffect(() => {
+    setItemSettingsDialog(null)
+  }, [selectedItemId])
 
   useEffect(() => {
     const loadSession = async () => {
@@ -928,7 +937,6 @@ function App() {
       setEpisodes([])
       setSelectedSubItemId(null)
       setSelectedEpisodeId(null)
-      setMainSelectedTemplateIds([])
       return
     }
     void loadSubItems(selectedItemId)
@@ -1768,38 +1776,24 @@ function App() {
     await loadEpisodes(selectedSubItemId)
   }
 
-  const handleMainTemplateButton = (template: SubItemTemplateRow) => {
-    if (mainSelectedTemplateIds.includes(template.id)) {
-      openEditPresetDialog('template', template.id)
-      return
-    }
-    setSelectedSettingsTemplateId(template.id)
-    setMainSelectedTemplateIds((current) => uniqueStrings([...current, template.id]))
-  }
-
-  const removeMainTemplateSelection = (templateId: string) => {
-    setMainSelectedTemplateIds((current) => current.filter((id) => id !== templateId))
-  }
-
-  const addSelectedTemplatesToItem = async () => {
+  const addTemplatesToSelectedItem = async (templateIds: string[]) => {
     setError('')
 
     if (!selectedItemId) {
       setError('先に親項目を選択してください。')
-      return
+      return false
     }
-    if (mainSelectedTemplateIds.length === 0) {
-      setError('追加する項目内項目を選択してください。')
-      return
+    if (templateIds.length === 0) {
+      return true
     }
 
-    const selectedTemplates = mainSelectedTemplateIds
+    const selectedTemplates = templateIds
       .map((templateId) => subItemTemplates.find((template) => template.id === templateId))
       .filter((template): template is SubItemTemplateRow => Boolean(template))
 
     if (selectedTemplates.length === 0) {
       setError('選択中の項目内項目が見つかりません。')
-      return
+      return false
     }
 
     const baseSortOrder =
@@ -1827,17 +1821,11 @@ function App() {
       } else {
         setError(insertError.message)
       }
-      return
+      return false
     }
 
-    setMainSelectedTemplateIds([])
     await loadSubItems(selectedItemId)
-  }
-
-  const removeMainTag = async (name: string) => {
-    const nextTags = mainSelectedTags.filter((tag) => tag !== name)
-    setMainSelectedTags(nextTags)
-    await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
+    return true
   }
 
   const handleSettingsTagButton = (tag: TagPresetRow) => {
@@ -1864,20 +1852,46 @@ function App() {
     setSelectedSettingsBodyTagId(tag.id)
   }
 
-  const handleMainTagButton = async (tag: TagPresetRow) => {
-    if (mainSelectedTags.includes(tag.name)) {
-      if (selectedSettingsTagId === tag.id) {
-        openEditPresetDialog('tag', tag.id)
-        return
-      }
-      setSelectedSettingsTagId(tag.id)
-      return
-    }
+  const openItemSettingsDialog = () => {
+    if (!selectedItemId) return
+    setItemSettingsDialog({
+      selectedTags: uniqueStrings(mainSelectedTags),
+      selectedTemplateIds: [],
+    })
+  }
 
-    const nextTags = uniqueStrings([...mainSelectedTags, tag.name])
-    setMainSelectedTags(nextTags)
-    setSelectedSettingsTagId(tag.id)
-    await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
+  const toggleItemSettingsTag = (tagName: string) => {
+    setItemSettingsDialog((current) => {
+      if (!current) return current
+      if (current.selectedTags.includes(tagName)) {
+        return { ...current, selectedTags: current.selectedTags.filter((name) => name !== tagName) }
+      }
+      return { ...current, selectedTags: uniqueStrings([...current.selectedTags, tagName]) }
+    })
+  }
+
+  const toggleItemSettingsTemplate = (templateId: string) => {
+    setItemSettingsDialog((current) => {
+      if (!current) return current
+      if (current.selectedTemplateIds.includes(templateId)) {
+        return { ...current, selectedTemplateIds: current.selectedTemplateIds.filter((id) => id !== templateId) }
+      }
+      return { ...current, selectedTemplateIds: uniqueStrings([...current.selectedTemplateIds, templateId]) }
+    })
+  }
+
+  const saveItemSettingsDialog = async () => {
+    if (!itemSettingsDialog || !selectedItemId || dialogBusy) return
+    setDialogBusy(true)
+    try {
+      await saveItemMeta(mainScheduledFrom, mainScheduledTo, itemSettingsDialog.selectedTags)
+      const ok = await addTemplatesToSelectedItem(itemSettingsDialog.selectedTemplateIds)
+      if (!ok) return
+      setMainSelectedTags(itemSettingsDialog.selectedTags)
+      setItemSettingsDialog(null)
+    } finally {
+      setDialogBusy(false)
+    }
   }
 
   const deleteSubItem = async (subItem: SubItemRow) => {
@@ -3151,13 +3165,23 @@ function App() {
               </>
             ) : (
               <>
-                <div className="content-head">
-                  <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
-                  <p className="subtle">
-                    {selectedItem
-                      ? '構造: 項目内項目 -> 本文、項目 -> 日付/項目タグ'
-                      : '左の一覧から項目を選ぶか、新しく作成してください。'}
-                  </p>
+                <div className="content-head content-head-with-action">
+                  <div>
+                    <h2>{selectedItem ? `項目: ${selectedItem.title}` : '項目を選択してください'}</h2>
+                    <p className="subtle">
+                      {selectedItem
+                        ? '構造: 項目内項目 -> 本文、項目 -> 日付/項目タグ'
+                        : '左の一覧から項目を選ぶか、新しく作成してください。'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={openItemSettingsDialog}
+                    disabled={!selectedItemId}
+                  >
+                    設定
+                  </button>
                 </div>
 
                 <section className="main-section">
@@ -3237,108 +3261,6 @@ function App() {
                   </div>
                 </section>
 
-                <section className="main-section">
-                  <h3>項目タグ</h3>
-                  <p className="subtle">選択中タグを再クリックすると、タグ設定ウインドウを開きます。</p>
-                  <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
-                    ＋ タグを作成
-                  </button>
-                  <div className="tag-picker">
-                    {tagPresets.length === 0 ? (
-                      <p className="subtle">タグがありません。上のボタンで作成してください</p>
-                    ) : (
-                      tagPresets.map((tag) => (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          className={`ghost-button tag-preset-button ${
-                            mainSelectedTags.includes(tag.name) ? 'active' : ''
-                          } ${dragState?.kind === 'tag' && dragState.id === tag.id ? 'dragging' : ''}`}
-                          onClick={() => void handleMainTagButton(tag)}
-                          disabled={!selectedItemId}
-                          draggable
-                          onDragStart={(event) => startSortDrag('tag', tag.id, event)}
-                          onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
-                          onDrop={(event) => void dropSort('tag', tag.id, event)}
-                          onDragEnd={() => setDragState(null)}
-                        >
-                          {tag.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  {mainSelectedTags.length > 0 && (
-                    <div className="selected-tag-list">
-                      {mainSelectedTags.map((tagName) => (
-                        <button
-                          key={tagName}
-                          type="button"
-                          className="selected-tag-chip"
-                          onClick={() => void removeMainTag(tagName)}
-                        >
-                          {tagName} ×
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <section className="main-section subitem-form">
-                  <h3>項目内項目追加</h3>
-                  <p className="subtle">複数選択して一括追加できます。選択済みを再クリックすると詳細ウインドウを開きます。</p>
-                  <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
-                    ＋ 項目内項目を作成
-                  </button>
-                  <div className="template-button-list">
-                    {subItemTemplates.length === 0 ? (
-                      <p className="subtle">項目内項目がありません。上のボタンで作成してください</p>
-                    ) : (
-                      subItemTemplates.map((template) => (
-                        <button
-                          key={template.id}
-                          type="button"
-                          className={`ghost-button template-button ${
-                            mainSelectedTemplateIds.includes(template.id) ? 'active' : ''
-                          } ${dragState?.kind === 'template' && dragState.id === template.id ? 'dragging' : ''}`}
-                          onClick={() => void handleMainTemplateButton(template)}
-                          disabled={!selectedItemId}
-                          draggable
-                          onDragStart={(event) => startSortDrag('template', template.id, event)}
-                          onDragOver={(event) => allowSortDrop('template', template.id, event)}
-                          onDrop={(event) => void dropSort('template', template.id, event)}
-                          onDragEnd={() => setDragState(null)}
-                        >
-                          {template.title}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  {mainSelectedTemplateIds.length > 0 && (
-                    <div className="selected-template-list">
-                      {mainSelectedTemplateIds.map((templateId) => {
-                        const templateName =
-                          subItemTemplates.find((template) => template.id === templateId)?.title ?? templateId
-                        return (
-                          <button
-                            key={templateId}
-                            type="button"
-                            className="selected-template-chip"
-                            onClick={() => removeMainTemplateSelection(templateId)}
-                          >
-                            {templateName} ×
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={addSelectedTemplatesToItem}
-                    disabled={!selectedItemId || mainSelectedTemplateIds.length === 0}
-                  >
-                    選択した項目内項目を追加
-                  </button>
-                </section>
               </>
             )}
           </section>
@@ -3397,6 +3319,113 @@ function App() {
               )}
               <button type="submit" disabled={dialogBusy}>
                 {presetDialog.mode === 'create' ? '作成' : '保存'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {itemSettingsDialog && (
+        <div className="overlay">
+          <form
+            className="dialog-panel"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveItemSettingsDialog()
+            }}
+          >
+            <h2>項目の設定</h2>
+            <section className="dialog-field">
+              <span>項目タグ</span>
+              <div className="tag-picker">
+                {tagPresets.length === 0 ? (
+                  <p className="subtle">項目タグがありません。設定ページで作成してください。</p>
+                ) : (
+                  tagPresets.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`ghost-button tag-preset-button ${
+                        itemSettingsDialog.selectedTags.includes(tag.name) ? 'active' : ''
+                      }`}
+                      onClick={() => toggleItemSettingsTag(tag.name)}
+                      disabled={dialogBusy}
+                    >
+                      {tag.name}
+                    </button>
+                  ))
+                )}
+              </div>
+              {itemSettingsDialog.selectedTags.length > 0 && (
+                <div className="selected-tag-list">
+                  {itemSettingsDialog.selectedTags.map((tagName) => (
+                    <button
+                      key={tagName}
+                      type="button"
+                      className="selected-tag-chip"
+                      onClick={() => toggleItemSettingsTag(tagName)}
+                      disabled={dialogBusy}
+                    >
+                      {tagName} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="dialog-field">
+              <span>項目内項目を追加</span>
+              <div className="template-button-list">
+                {subItemTemplates.length === 0 ? (
+                  <p className="subtle">項目内項目がありません。設定ページで作成してください。</p>
+                ) : (
+                  subItemTemplates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className={`ghost-button template-button ${
+                        itemSettingsDialog.selectedTemplateIds.includes(template.id) ? 'active' : ''
+                      }`}
+                      onClick={() => toggleItemSettingsTemplate(template.id)}
+                      disabled={dialogBusy}
+                    >
+                      {template.title}
+                    </button>
+                  ))
+                )}
+              </div>
+              {itemSettingsDialog.selectedTemplateIds.length > 0 && (
+                <div className="selected-template-list">
+                  {itemSettingsDialog.selectedTemplateIds.map((templateId) => {
+                    const templateName =
+                      subItemTemplates.find((template) => template.id === templateId)?.title ?? templateId
+                    return (
+                      <button
+                        key={templateId}
+                        type="button"
+                        className="selected-template-chip"
+                        onClick={() => toggleItemSettingsTemplate(templateId)}
+                        disabled={dialogBusy}
+                      >
+                        {templateName} ×
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setItemSettingsDialog(null)}
+                disabled={dialogBusy}
+              >
+                閉じる
+              </button>
+              <button type="submit" disabled={dialogBusy}>
+                保存
               </button>
             </div>
           </form>
