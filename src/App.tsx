@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DragEvent, FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -54,6 +54,13 @@ type FilterTermRow = {
   created_at: string
 }
 
+type ParserLineRuleRow = {
+  id: string
+  line_text: string
+  classification: 'speaker' | 'direction'
+  created_at: string
+}
+
 type SpeakerProfileRow = {
   id: string
   name: string
@@ -65,6 +72,8 @@ type ParsedLineRow = {
   kind: 'dialogue' | 'direction'
   speaker: string
   content: string
+  sourceLine: string
+  sourceRule: 'speaker' | 'direction' | null
 }
 
 type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag'
@@ -86,6 +95,11 @@ const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item)
 
 const isMissingRelationError = (message: string) =>
   message.includes('relation') && message.includes('does not exist')
+
+const getLineRule = (
+  lineRuleMap: Map<string, 'speaker' | 'direction'>,
+  line: string,
+): 'speaker' | 'direction' | null => lineRuleMap.get(line) ?? null
 
 const splitAndFilterLines = (rawText: string, blockedTerms: Set<string>) => {
   const normalizedLines = rawText
@@ -123,6 +137,7 @@ const isLikelySpeakerLine = (line: string, nextLine: string | undefined, knownSp
 const parseScriptLines = (
   rawText: string,
   blockedTerms: string[],
+  lineRuleMap: Map<string, 'speaker' | 'direction'>,
   speakerNames: string[],
 ) => {
   const blockedSet = new Set(blockedTerms.map((term) => term.trim()).filter(Boolean))
@@ -133,14 +148,22 @@ const parseScriptLines = (
     const line = lines[index]
     const nextLine = lines[index + 1]
     const nextNextLine = lines[index + 2]
-    const lineIsSpeaker = isLikelySpeakerLine(line, nextLine, knownSpeakers)
-    const nextIsSpeaker = nextLine ? isLikelySpeakerLine(nextLine, nextNextLine, knownSpeakers) : false
+    const lineRule = getLineRule(lineRuleMap, line)
+    const nextRule = nextLine ? getLineRule(lineRuleMap, nextLine) : null
+    const lineIsSpeaker =
+      lineRule === 'speaker' || (lineRule !== 'direction' && isLikelySpeakerLine(line, nextLine, knownSpeakers))
+    const nextIsSpeaker = nextLine
+      ? nextRule === 'speaker' ||
+        (nextRule !== 'direction' && isLikelySpeakerLine(nextLine, nextNextLine, knownSpeakers))
+      : false
 
-    if (lineIsSpeaker && nextLine && !nextIsSpeaker) {
+    if (lineIsSpeaker && nextLine && nextRule !== 'direction' && !nextIsSpeaker) {
       rows.push({
         kind: 'dialogue',
         speaker: line,
         content: nextLine,
+        sourceLine: line,
+        sourceRule: lineRule,
       })
       index += 2
       continue
@@ -150,6 +173,8 @@ const parseScriptLines = (
       kind: 'direction',
       speaker: '',
       content: line,
+      sourceLine: line,
+      sourceRule: lineRule,
     })
     index += 1
   }
@@ -195,6 +220,7 @@ function App() {
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
   const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
   const [filterTerms, setFilterTerms] = useState<FilterTermRow[]>([])
+  const [lineRules, setLineRules] = useState<ParserLineRuleRow[]>([])
   const [speakerProfiles, setSpeakerProfiles] = useState<SpeakerProfileRow[]>([])
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
@@ -221,6 +247,15 @@ function App() {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dragState, setDragState] = useState<{ kind: SortableKind; id: string } | null>(null)
+
+  const lineRuleMap = useMemo(
+    () => new Map(lineRules.map((rule) => [rule.line_text, rule.classification])),
+    [lineRules],
+  )
+  const lineRuleEntryMap = useMemo(
+    () => new Map(lineRules.map((rule) => [rule.line_text, rule])),
+    [lineRules],
+  )
 
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? null
   const selectedSubItem = subItems.find((subItem) => subItem.id === selectedSubItemId) ?? null
@@ -507,6 +542,24 @@ function App() {
     setFilterTerms((data ?? []) as FilterTermRow[])
   }
 
+  const loadLineRules = async () => {
+    const { data, error: loadError } = await supabase
+      .from('parser_line_classifications')
+      .select('id, line_text, classification, created_at')
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setLineRules([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    setLineRules((data ?? []) as ParserLineRuleRow[])
+  }
+
   const loadSpeakerProfiles = async () => {
     const { data, error: loadError } = await supabase
       .from('speaker_profiles')
@@ -533,6 +586,7 @@ function App() {
       setSubItemTemplates([])
       setTagPresets([])
       setFilterTerms([])
+      setLineRules([])
       setSpeakerProfiles([])
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
@@ -547,6 +601,7 @@ function App() {
     void loadSubItemTemplates()
     void loadTagPresets()
     void loadFilterTerms()
+    void loadLineRules()
     void loadSpeakerProfiles()
   }, [session, accessStatus])
 
@@ -1342,10 +1397,11 @@ function App() {
     await loadSpeakerProfiles()
   }
 
-  const runSpeakerSplit = () => {
+  const applyParserResult = (ruleMap: Map<string, 'speaker' | 'direction'>) => {
     const parsed = parseScriptLines(
       subItemBodyDraft,
       filterTerms.map((term) => term.term),
+      ruleMap,
       speakerProfiles.map((profile) => profile.name),
     )
 
@@ -1361,6 +1417,66 @@ function App() {
       .map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`))
       .join('\n\n')
     setSubItemBodyDraft(formatted)
+  }
+
+  const runSpeakerSplit = () => {
+    applyParserResult(lineRuleMap)
+  }
+
+  const upsertLineRule = async (lineText: string, classification: 'speaker' | 'direction') => {
+    setError('')
+    const trimmed = lineText.trim()
+    if (!trimmed) return
+
+    const { data, error: upsertError } = await supabase
+      .from('parser_line_classifications')
+      .upsert({ line_text: trimmed, classification }, { onConflict: 'line_text' })
+      .select('id, line_text, classification, created_at')
+      .maybeSingle()
+
+    if (upsertError) {
+      if (isMissingRelationError(upsertError.message)) {
+        setError('parser_line_classifications テーブルが必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(upsertError.message)
+      }
+      return
+    }
+
+    const nextRules = new Map(lineRuleMap)
+    nextRules.set(trimmed, classification)
+    setLineRules((current) => {
+      if (!data) {
+        const fallbackRule: ParserLineRuleRow = {
+          id: crypto.randomUUID(),
+          line_text: trimmed,
+          classification,
+          created_at: new Date().toISOString(),
+        }
+        const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
+        return [...withoutOld, fallbackRule]
+      }
+      const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
+      return [...withoutOld, data as ParserLineRuleRow]
+    })
+    applyParserResult(nextRules)
+  }
+
+  const removeLineRule = async (rule: ParserLineRuleRow) => {
+    const { error: deleteError } = await supabase
+      .from('parser_line_classifications')
+      .delete()
+      .eq('id', rule.id)
+
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+
+    const nextRules = new Map(lineRuleMap)
+    nextRules.delete(rule.line_text)
+    setLineRules((current) => current.filter((item) => item.id !== rule.id))
+    applyParserResult(nextRules)
   }
 
   if (!session) {
@@ -1464,7 +1580,6 @@ function App() {
 
             <section className="settings-section">
               <h3>項目内項目設定</h3>
-              <p className="subtle">同じボタンをもう一度押すと詳細ウインドウを開きます。</p>
               <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('template')}>
                 ＋ 項目内項目を作成
               </button>
@@ -1495,7 +1610,6 @@ function App() {
 
             <section className="settings-section">
               <h3>項目タグ設定</h3>
-              <p className="subtle">同じボタンをもう一度押すと詳細ウインドウを開きます。</p>
               <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('tag')}>
                 ＋ タグを作成
               </button>
@@ -1557,6 +1671,47 @@ function App() {
                     >
                       {termRow.term} ×
                     </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h3>判定学習ルール</h3>
+              <p className="subtle">本文プレビューで学習した話者/演出判定です。不要なら削除できます。</p>
+              <div className="settings-rule-list">
+                {lineRules.length === 0 ? (
+                  <p className="subtle">学習ルールはまだありません</p>
+                ) : (
+                  lineRules.map((rule) => (
+                    <article key={rule.id} className="settings-rule-row">
+                      <p className="settings-rule-text">
+                        <span
+                          className={`settings-rule-kind ${
+                            rule.classification === 'speaker' ? 'speaker' : 'direction'
+                          }`}
+                        >
+                          {rule.classification === 'speaker' ? '話者' : '演出'}
+                        </span>
+                        <span className="settings-rule-line">{rule.line_text}</span>
+                      </p>
+                      <button
+                        type="button"
+                        className="danger-button mini-action"
+                        onClick={() =>
+                          openConfirmDialog({
+                            title: '判定学習ルールの削除',
+                            message: `「${rule.line_text}」の学習ルールを削除します。`,
+                            confirmLabel: '削除する',
+                            onConfirm: async () => {
+                              await removeLineRule(rule)
+                            },
+                          })
+                        }
+                      >
+                        削除
+                      </button>
+                    </article>
                   ))
                 )}
               </div>
@@ -1769,10 +1924,53 @@ function App() {
                         <div className="parsed-line-list">
                           {parsedLines.map((row, index) => {
                             const profile = speakerProfiles.find((speaker) => speaker.name === row.speaker) ?? null
+                            const sourceRuleEntry = lineRuleEntryMap.get(row.sourceLine) ?? null
                             if (row.kind === 'direction') {
                               return (
                                 <article key={`direction-${index}`} className="parsed-line-row parsed-line-row-direction">
-                                  <p className="parsed-direction-label">演出</p>
+                                  <div className="parsed-direction-head">
+                                    <div className="parsed-row-meta">
+                                      <p className="parsed-direction-label">演出</p>
+                                      {sourceRuleEntry && (
+                                        <span
+                                          className={`parsed-rule-badge ${
+                                            sourceRuleEntry.classification === 'speaker'
+                                              ? 'speaker'
+                                              : 'direction'
+                                          }`}
+                                        >
+                                          学習: {sourceRuleEntry.classification === 'speaker' ? '話者' : '演出'}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="parsed-row-actions">
+                                      <button
+                                        type="button"
+                                        className="ghost-button parsed-row-action"
+                                        onClick={() => void upsertLineRule(row.sourceLine, 'speaker')}
+                                      >
+                                        話者に学習
+                                      </button>
+                                      {sourceRuleEntry && (
+                                        <button
+                                          type="button"
+                                          className="ghost-button parsed-row-action"
+                                          onClick={() =>
+                                            openConfirmDialog({
+                                              title: '学習ルールの解除',
+                                              message: `「${sourceRuleEntry.line_text}」の学習ルールを解除します。`,
+                                              confirmLabel: '解除する',
+                                              onConfirm: async () => {
+                                                await removeLineRule(sourceRuleEntry)
+                                              },
+                                            })
+                                          }
+                                        >
+                                          学習解除
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
                                   <p className="parsed-line-text">{row.content}</p>
                                 </article>
                               )
@@ -1788,9 +1986,54 @@ function App() {
                                     )}
                                   </span>
                                   <p className="speaker-name parsed-speaker-name">{row.speaker}</p>
+                                  {sourceRuleEntry && (
+                                    <span
+                                      className={`parsed-rule-badge ${
+                                        sourceRuleEntry.classification === 'speaker' ? 'speaker' : 'direction'
+                                      }`}
+                                    >
+                                      学習: {sourceRuleEntry.classification === 'speaker' ? '話者' : '演出'}
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="parsed-line-content parsed-line-bubble">
-                                  <p className="parsed-line-text">{row.content}</p>
+                                <div className="parsed-line-content">
+                                  <div className="parsed-line-bubble">
+                                    <p className="parsed-line-text">{row.content}</p>
+                                  </div>
+                                  <div className="parsed-row-actions parsed-dialogue-actions">
+                                    <button
+                                      type="button"
+                                      className="ghost-button parsed-row-action"
+                                      onClick={() => void upsertLineRule(row.sourceLine, 'speaker')}
+                                    >
+                                      話者に固定
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost-button parsed-row-action"
+                                      onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
+                                    >
+                                      演出に学習
+                                    </button>
+                                    {sourceRuleEntry && (
+                                      <button
+                                        type="button"
+                                        className="ghost-button parsed-row-action"
+                                        onClick={() =>
+                                          openConfirmDialog({
+                                            title: '学習ルールの解除',
+                                            message: `「${sourceRuleEntry.line_text}」の学習ルールを解除します。`,
+                                            confirmLabel: '解除する',
+                                            onConfirm: async () => {
+                                              await removeLineRule(sourceRuleEntry)
+                                            },
+                                          })
+                                        }
+                                      >
+                                        学習解除
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               </article>
                             )

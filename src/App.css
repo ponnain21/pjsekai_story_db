@@ -213,11 +213,41 @@
   background: #f4f9ff;
 }
 
+.parsed-direction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.parsed-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .parsed-direction-label {
   margin: 0;
   font-size: 0.76rem;
   color: #2f6f9d;
   font-weight: 700;
+}
+
+.parsed-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.parsed-row-action {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.42rem;
+}
+
+.parsed-dialogue-actions {
+  margin-top: 0.35rem;
+  justify-content: flex-end;
 }
 
 .parsed-line-content {
@@ -244,6 +274,27 @@
   text-align: center;
   line-height: 1.1;
   overflow-wrap: anywhere;
+}
+
+.parsed-rule-badge {
+  border: 1px solid #c6d2dc;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  padding: 0.12rem 0.35rem;
+  white-space: nowrap;
+}
+
+.parsed-rule-badge.speaker {
+  border-color: #7db9e2;
+  background: #e9f5ff;
+  color: #1a6696;
+}
+
+.parsed-rule-badge.direction {
+  border-color: #b9cbdc;
+  background: #f1f5f8;
+  color: #4c6477;
 }
 
 .parsed-line-bubble {
@@ -426,6 +477,60 @@
   border-radius: 999px;
   font-size: 0.8rem;
   padding: 0.2rem 0.55rem;
+}
+
+.settings-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.settings-rule-row {
+  border: 1px solid #d9e4ec;
+  border-radius: 10px;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.35rem 0.45rem;
+}
+
+.settings-rule-text {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.settings-rule-kind {
+  border: 1px solid #c6d2dc;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  padding: 0.14rem 0.35rem;
+  white-space: nowrap;
+}
+
+.settings-rule-kind.speaker {
+  border-color: #7db9e2;
+  background: #e9f5ff;
+  color: #1a6696;
+}
+
+.settings-rule-kind.direction {
+  border-color: #b9cbdc;
+  background: #f1f5f8;
+  color: #4c6477;
+}
+
+.settings-rule-line {
+  color: #304455;
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .speaker-profile-list {
@@ -764,5 +869,14 @@ button:disabled {
   .parsed-speaker-avatar {
     width: 2.6rem;
     height: 2.6rem;
+  }
+
+  .parsed-direction-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .parsed-dialogue-actions {
+    justify-content: flex-start;
   }
 }
