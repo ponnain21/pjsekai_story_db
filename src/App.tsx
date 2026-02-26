@@ -2425,31 +2425,31 @@ function App() {
                         >
                           話あり（複数）
                         </button>
+                        <span className="mode-toggle-divider" aria-hidden="true" />
+                        <button
+                          type="button"
+                          className={`ghost-button mode-toggle-button ${
+                            selectedSubItem.episode_number_start === 0 ? 'active' : ''
+                          }`}
+                          onClick={() => void saveEpisodeNumberStart(0)}
+                          disabled={!selectedSubItem.has_episodes}
+                        >
+                          0始まり
+                        </button>
+                        <button
+                          type="button"
+                          className={`ghost-button mode-toggle-button ${
+                            selectedSubItem.episode_number_start === 1 ? 'active' : ''
+                          }`}
+                          onClick={() => void saveEpisodeNumberStart(1)}
+                          disabled={!selectedSubItem.has_episodes}
+                        >
+                          1始まり
+                        </button>
                       </div>
 
                       {selectedSubItem.has_episodes ? (
                         <>
-                          <div className="mode-toggle-group">
-                            <button
-                              type="button"
-                              className={`ghost-button mode-toggle-button ${
-                                selectedSubItem.episode_number_start === 0 ? 'active' : ''
-                              }`}
-                              onClick={() => void saveEpisodeNumberStart(0)}
-                            >
-                              0始まり
-                            </button>
-                            <button
-                              type="button"
-                              className={`ghost-button mode-toggle-button ${
-                                selectedSubItem.episode_number_start === 1 ? 'active' : ''
-                              }`}
-                              onClick={() => void saveEpisodeNumberStart(1)}
-                            >
-                              1始まり
-                            </button>
-                          </div>
-
                           <label className="stack-inline-file">
                             話ラベル（任意・1行につき1つ。例: 前編 / 後編）
                             <textarea

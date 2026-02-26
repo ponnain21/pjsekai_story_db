@@ -142,6 +142,13 @@
   gap: 0.45rem;
 }
 
+.mode-toggle-divider {
+  width: 1px;
+  min-height: 1.9rem;
+  background: #cfd9e1;
+  align-self: stretch;
+}
+
 .mode-toggle-button.active {
   border-color: #1f8bc7;
   background: #e7f5ff;
@@ -884,6 +891,10 @@ button:disabled {
 
   .episode-create-row {
     grid-template-columns: 1fr;
+  }
+
+  .mode-toggle-divider {
+    display: none;
   }
 
   .settings-inline-form {
