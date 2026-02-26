@@ -760,9 +760,11 @@
 }
 
 .speaker-dialog-panel {
-  width: min(92rem, 98vw);
-  max-height: min(90vh, 58rem);
-  overflow: hidden;
+  width: min(112rem, calc(100vw - 0.7rem));
+  max-width: none;
+  height: min(92vh, 60rem);
+  max-height: calc(100vh - 0.7rem);
+  overflow: auto;
 }
 
 .speaker-dialog-head {
@@ -774,7 +776,7 @@
 .speaker-dialog-layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(15rem, 18rem) minmax(42rem, 1fr);
+  grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr);
   gap: 0.75rem;
 }
 
@@ -916,6 +918,10 @@
 
 .overlay-priority {
   z-index: 60;
+}
+
+.overlay-speaker {
+  padding: 0.35rem;
 }
 
 .overlay-confirm {

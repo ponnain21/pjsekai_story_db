@@ -3823,7 +3823,7 @@ function App() {
       )}
 
       {speakerSettingsDialogOpen && (
-        <div className="overlay overlay-priority">
+        <div className="overlay overlay-priority overlay-speaker">
           <section className="dialog-panel speaker-dialog-panel">
             <div className="speaker-dialog-head">
               <h2>話者一覧・編集</h2>
@@ -3895,7 +3895,7 @@ function App() {
                             <span className="subtle">
                               吹き出しID: {profile.speech_balloon_id ? profile.speech_balloon_id : '未設定'}
                             </span>
-                            <span className="subtle">{profile.icon_url ? profile.icon_url : 'アイコン未設定'}</span>
+                            {profile.icon_url && <span className="subtle">{profile.icon_url}</span>}
                           </span>
                         </button>
                         <button
