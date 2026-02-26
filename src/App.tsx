@@ -1276,18 +1276,19 @@ function App() {
     if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
-  const submitFilterTerm = async (event: FormEvent) => {
-    event.preventDefault()
+  const upsertFilterTerm = async (termValue: string, reparse = false) => {
     setError('')
-    const trimmed = filterTermDraft.trim()
+    const trimmed = termValue.trim()
     if (!trimmed) {
       setError('除去語句を入力してください。')
-      return
+      return false
     }
 
-    const { error: upsertError } = await supabase
+    const { data, error: upsertError } = await supabase
       .from('parser_filter_terms')
       .upsert({ term: trimmed }, { onConflict: 'term' })
+      .select('id, term, created_at')
+      .maybeSingle()
 
     if (upsertError) {
       if (isMissingRelationError(upsertError.message)) {
@@ -1295,11 +1296,33 @@ function App() {
       } else {
         setError(upsertError.message)
       }
-      return
+      return false
     }
 
+    const resolvedRow: FilterTermRow =
+      (data as FilterTermRow | null) ?? {
+        id: crypto.randomUUID(),
+        term: trimmed,
+        created_at: new Date().toISOString(),
+      }
+    const nextRows = [...filterTerms.filter((row) => row.term !== trimmed), resolvedRow].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at),
+    )
+    setFilterTerms(nextRows)
+    if (reparse) {
+      applyParserResult(
+        lineRuleMap,
+        nextRows.map((row) => row.term),
+      )
+    }
+    return true
+  }
+
+  const submitFilterTerm = async (event: FormEvent) => {
+    event.preventDefault()
+    const ok = await upsertFilterTerm(filterTermDraft)
+    if (!ok) return
     setFilterTermDraft('')
-    await loadFilterTerms()
   }
 
   const deleteFilterTerm = async (termRow: FilterTermRow) => {
@@ -1397,10 +1420,13 @@ function App() {
     await loadSpeakerProfiles()
   }
 
-  const applyParserResult = (ruleMap: Map<string, 'speaker' | 'direction'>) => {
+  const applyParserResult = (
+    ruleMap: Map<string, 'speaker' | 'direction'>,
+    blockedTermsOverride?: string[],
+  ) => {
     const parsed = parseScriptLines(
       subItemBodyDraft,
-      filterTerms.map((term) => term.term),
+      blockedTermsOverride ?? filterTerms.map((term) => term.term),
       ruleMap,
       speakerProfiles.map((profile) => profile.name),
     )
@@ -1951,6 +1977,13 @@ function App() {
                                       >
                                         話者に学習
                                       </button>
+                                      <button
+                                        type="button"
+                                        className="ghost-button parsed-row-action"
+                                        onClick={() => void upsertFilterTerm(row.sourceLine, true)}
+                                      >
+                                        除外語句に学習
+                                      </button>
                                       {sourceRuleEntry && (
                                         <button
                                           type="button"
@@ -2014,6 +2047,13 @@ function App() {
                                       onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
                                     >
                                       演出に学習
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost-button parsed-row-action"
+                                      onClick={() => void upsertFilterTerm(row.sourceLine, true)}
+                                    >
+                                      除外語句に学習
                                     </button>
                                     {sourceRuleEntry && (
                                       <button

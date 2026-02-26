@@ -191,7 +191,7 @@
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.55rem;
-  max-height: 34vh;
+  max-height: 38vh;
   overflow: auto;
 }
 
@@ -337,7 +337,14 @@
 }
 
 .body-page-section .body-editor {
-  min-height: min(58vh, 34rem);
+  min-height: clamp(6.5rem, 15vh, 10rem);
+  max-height: 14rem;
+}
+
+.body-page-section .parsed-line-list {
+  flex: 1;
+  min-height: min(58vh, 42rem);
+  max-height: none;
 }
 
 .subitem-list {
@@ -878,5 +885,9 @@ button:disabled {
 
   .parsed-dialogue-actions {
     justify-content: flex-start;
+  }
+
+  .body-page-section .parsed-line-list {
+    min-height: 42vh;
   }
 }
