@@ -90,6 +90,13 @@ create table if not exists public.parser_filter_terms (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.parser_line_classifications (
+  id uuid primary key default gen_random_uuid(),
+  line_text text not null unique,
+  classification text not null check (classification in ('speaker', 'direction')),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.speaker_profiles (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
@@ -115,5 +122,6 @@ create index if not exists idx_subitem_episodes_sort_order on public.subitem_epi
 create index if not exists idx_subitem_templates_sort_order on public.subitem_templates (sort_order);
 create index if not exists idx_subitem_tag_presets_sort_order on public.subitem_tag_presets (sort_order);
 create index if not exists idx_parser_filter_terms_term on public.parser_filter_terms (term);
+create index if not exists idx_parser_line_classifications_line_text on public.parser_line_classifications (line_text);
 create index if not exists idx_speaker_profiles_name on public.speaker_profiles (name);
 create index if not exists idx_entries_thread_id on public.entries (thread_id);

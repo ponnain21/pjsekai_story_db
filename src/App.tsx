@@ -123,16 +123,36 @@ const splitAndFilterLines = (rawText: string, blockedTerms: Set<string>) => {
   })
 }
 
-const isLikelySpeakerLine = (line: string, nextLine: string | undefined, knownSpeakers: Set<string>) => {
-  if (!line) return false
-  if (knownSpeakers.has(line)) return true
-  if (!nextLine) return false
-  if (line.length > 20) return false
-  if (/[。、，．!?！？]/.test(line)) return false
-  if (/\s/.test(line)) return false
-  if (/^[0-9０-９\-〜～]+$/.test(line)) return false
-  return true
+const splitSpeakerAndDialogueFromSingleLine = (line: string) => {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+
+  const colonMatch = trimmed.match(/^(.+?)[：:]\s*(.+)$/)
+  if (colonMatch) {
+    const speaker = colonMatch[1]?.trim()
+    const dialogue = colonMatch[2]?.trim()
+    if (speaker && dialogue) return { speaker, dialogue }
+  }
+
+  const quoteMatch = trimmed.match(/^(.+?)[「『](.+)[」』]$/)
+  if (quoteMatch) {
+    const speaker = quoteMatch[1]?.trim()
+    const dialogue = quoteMatch[2]?.trim()
+    if (speaker && dialogue) return { speaker, dialogue }
+  }
+
+  const openQuoteMatch = trimmed.match(/^(.+?)[「『](.+)$/)
+  if (openQuoteMatch) {
+    const speaker = openQuoteMatch[1]?.trim()
+    const dialogue = openQuoteMatch[2]?.trim()
+    if (speaker && dialogue) return { speaker, dialogue }
+  }
+
+  return null
 }
+
+const formatParsedRowsToBody = (rows: ParsedLineRow[]) =>
+  rows.map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`)).join('\n\n')
 
 const parseScriptLines = (
   rawText: string,
@@ -147,17 +167,50 @@ const parseScriptLines = (
   for (let index = 0; index < lines.length; ) {
     const line = lines[index]
     const nextLine = lines[index + 1]
-    const nextNextLine = lines[index + 2]
     const lineRule = getLineRule(lineRuleMap, line)
     const nextRule = nextLine ? getLineRule(lineRuleMap, nextLine) : null
-    const lineIsSpeaker =
-      lineRule === 'speaker' || (lineRule !== 'direction' && isLikelySpeakerLine(line, nextLine, knownSpeakers))
-    const nextIsSpeaker = nextLine
-      ? nextRule === 'speaker' ||
-        (nextRule !== 'direction' && isLikelySpeakerLine(nextLine, nextNextLine, knownSpeakers))
-      : false
+    const lineIsKnownSpeaker = knownSpeakers.has(line)
+    const nextIsKnownSpeaker = nextLine ? knownSpeakers.has(nextLine) : false
+    const lineIsForcedSpeaker = lineRule === 'speaker'
+    const nextIsForcedSpeaker = nextRule === 'speaker'
 
-    if (lineIsSpeaker && nextLine && nextRule !== 'direction' && !nextIsSpeaker) {
+    if (lineRule === 'direction') {
+      rows.push({
+        kind: 'direction',
+        speaker: '',
+        content: line,
+        sourceLine: line,
+        sourceRule: lineRule,
+      })
+      index += 1
+      continue
+    }
+
+    if ((lineIsKnownSpeaker || lineIsForcedSpeaker) && nextLine && nextRule !== 'direction') {
+      rows.push({
+        kind: 'dialogue',
+        speaker: line,
+        content: nextLine,
+        sourceLine: line,
+        sourceRule: lineRule,
+      })
+      index += 2
+      continue
+    }
+
+    if (nextLine && (nextIsKnownSpeaker || nextIsForcedSpeaker)) {
+      rows.push({
+        kind: 'direction',
+        speaker: '',
+        content: line,
+        sourceLine: line,
+        sourceRule: lineRule,
+      })
+      index += 1
+      continue
+    }
+
+    if (nextLine && nextRule !== 'direction') {
       rows.push({
         kind: 'dialogue',
         speaker: line,
@@ -625,6 +678,46 @@ function App() {
     }
     void loadEpisodes(selectedSubItemId)
   }, [selectedSubItemId, selectedSubItem?.has_episodes])
+
+  useEffect(() => {
+    if (pageMode !== 'subitemBody' || !selectedSubItem) {
+      setParsedLines([])
+      return
+    }
+
+    if (selectedSubItem.has_episodes && !selectedEpisode) {
+      setParsedLines([])
+      return
+    }
+
+    if (!subItemBodyDraft.trim()) {
+      setParsedLines([])
+      return
+    }
+
+    const timerId = window.setTimeout(() => {
+      const parsed = parseScriptLines(
+        subItemBodyDraft,
+        filterTerms.map((term) => term.term),
+        lineRuleMap,
+        speakerProfiles.map((profile) => profile.name),
+      )
+      setParsedLines(parsed)
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timerId)
+    }
+  }, [
+    pageMode,
+    selectedSubItem?.id,
+    selectedSubItem?.has_episodes,
+    selectedEpisode?.id,
+    subItemBodyDraft,
+    filterTerms,
+    lineRuleMap,
+    speakerProfiles,
+  ])
 
   const loginWithGoogle = async () => {
     setError('')
@@ -1439,14 +1532,45 @@ function App() {
 
     setError('')
     setParsedLines(parsed)
-    const formatted = parsed
-      .map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`))
-      .join('\n\n')
-    setSubItemBodyDraft(formatted)
+    setSubItemBodyDraft(formatParsedRowsToBody(parsed))
   }
 
   const runSpeakerSplit = () => {
     applyParserResult(lineRuleMap)
+  }
+
+  const splitDialogueRowSpeakerLine = (rowIndex: number) => {
+    const row = parsedLines[rowIndex]
+    if (!row || row.kind !== 'dialogue') return
+
+    const split = splitSpeakerAndDialogueFromSingleLine(row.speaker)
+    if (!split) {
+      setError('話者行を分離できませんでした。例: 名前：セリフ / 名前「セリフ」')
+      return
+    }
+
+    const nextBody = parsedLines
+      .map((current, index) => {
+        if (index !== rowIndex || current.kind !== 'dialogue') {
+          return current.kind === 'direction' ? current.content : `${current.speaker}\n${current.content}`
+        }
+        const carryLine = current.content.trim()
+        return carryLine
+          ? `${split.speaker}\n${split.dialogue}\n${carryLine}`
+          : `${split.speaker}\n${split.dialogue}`
+      })
+      .join('\n\n')
+
+    setError('')
+    setSubItemBodyDraft(nextBody)
+    setParsedLines(
+      parseScriptLines(
+        nextBody,
+        filterTerms.map((term) => term.term),
+        lineRuleMap,
+        speakerProfiles.map((profile) => profile.name),
+      ),
+    )
   }
 
   const upsertLineRule = async (lineText: string, classification: 'speaker' | 'direction') => {
@@ -1980,6 +2104,13 @@ function App() {
                                       <button
                                         type="button"
                                         className="ghost-button parsed-row-action"
+                                        onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
+                                      >
+                                        演出に学習
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="ghost-button parsed-row-action"
                                         onClick={() => void upsertFilterTerm(row.sourceLine, true)}
                                       >
                                         除外語句に学習
@@ -2047,6 +2178,13 @@ function App() {
                                       onClick={() => void upsertLineRule(row.sourceLine, 'direction')}
                                     >
                                       演出に学習
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost-button parsed-row-action"
+                                      onClick={() => splitDialogueRowSpeakerLine(index)}
+                                    >
+                                      話者行を分離
                                     </button>
                                     <button
                                       type="button"

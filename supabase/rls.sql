@@ -9,6 +9,7 @@ alter table if exists public.entries enable row level security;
 alter table if exists public.subitem_templates enable row level security;
 alter table if exists public.subitem_tag_presets enable row level security;
 alter table if exists public.parser_filter_terms enable row level security;
+alter table if exists public.parser_line_classifications enable row level security;
 alter table if exists public.speaker_profiles enable row level security;
 
 drop policy if exists "allowed_users_select_self" on public.allowed_users;
@@ -399,6 +400,61 @@ with check (
 drop policy if exists "parser_filter_terms_delete_allowlisted" on public.parser_filter_terms;
 create policy "parser_filter_terms_delete_allowlisted"
 on public.parser_filter_terms for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_line_classifications_select_allowlisted" on public.parser_line_classifications;
+create policy "parser_line_classifications_select_allowlisted"
+on public.parser_line_classifications for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_line_classifications_insert_allowlisted" on public.parser_line_classifications;
+create policy "parser_line_classifications_insert_allowlisted"
+on public.parser_line_classifications for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_line_classifications_update_allowlisted" on public.parser_line_classifications;
+create policy "parser_line_classifications_update_allowlisted"
+on public.parser_line_classifications for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_line_classifications_delete_allowlisted" on public.parser_line_classifications;
+create policy "parser_line_classifications_delete_allowlisted"
+on public.parser_line_classifications for delete
 to authenticated
 using (
   exists (
