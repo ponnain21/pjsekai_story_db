@@ -18,6 +18,7 @@ type SubItemRow = {
   node_id: string
   title: string
   has_episodes: boolean
+  episode_number_start: number
   scheduled_on: string | null
   tags: string[] | null
   body: string
@@ -493,7 +494,7 @@ function App() {
   const loadSubItems = async (itemId: string) => {
     const { data, error: loadError } = await supabase
       .from('threads')
-      .select('id, node_id, title, has_episodes, scheduled_on, tags, body, sort_order, created_at')
+      .select('id, node_id, title, has_episodes, episode_number_start, scheduled_on, tags, body, sort_order, created_at')
       .eq('node_id', itemId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
@@ -511,9 +512,10 @@ function App() {
         return
       }
 
-      const fallbackSubItems = ((legacyData ?? []) as Omit<SubItemRow, 'has_episodes'>[]).map((subItem) => ({
+      const fallbackSubItems = ((legacyData ?? []) as Omit<SubItemRow, 'has_episodes' | 'episode_number_start'>[]).map((subItem) => ({
         ...subItem,
         has_episodes: false,
+        episode_number_start: 1,
       }))
       setSubItems(fallbackSubItems)
       setSelectedSubItemId((current) => {
@@ -1245,6 +1247,28 @@ function App() {
     }
   }
 
+  const saveEpisodeNumberStart = async (start: 0 | 1) => {
+    if (!selectedSubItem) return
+    if (selectedSubItem.episode_number_start === start) return
+    setError('')
+
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({ episode_number_start: start })
+      .eq('id', selectedSubItem.id)
+
+    if (updateError) {
+      if (updateError.message.includes('episode_number_start')) {
+        setError('threads テーブルに episode_number_start 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(updateError.message)
+      }
+      return
+    }
+
+    if (selectedItemId) await loadSubItems(selectedItemId)
+  }
+
   const addEpisode = async () => {
     if (!selectedSubItem) {
       setError('先に項目内項目を選択してください。')
@@ -1339,6 +1363,7 @@ function App() {
       node_id: selectedItemId,
       title: template.title,
       has_episodes: false,
+      episode_number_start: 1,
       scheduled_on: null,
       tags: [],
       body: '',
@@ -1347,8 +1372,8 @@ function App() {
 
     const { error: insertError } = await supabase.from('threads').insert(payload)
     if (insertError) {
-      if (insertError.message.includes('has_episodes')) {
-        setError('threads テーブルに has_episodes 列が必要です。supabase/schema.sql を実行してください。')
+      if (insertError.message.includes('has_episodes') || insertError.message.includes('episode_number_start')) {
+        setError('threads テーブルに has_episodes / episode_number_start 列が必要です。supabase/schema.sql を実行してください。')
       } else {
         setError(insertError.message)
       }
@@ -2283,6 +2308,27 @@ function App() {
 
                       {selectedSubItem.has_episodes ? (
                         <>
+                          <div className="mode-toggle-group">
+                            <button
+                              type="button"
+                              className={`ghost-button mode-toggle-button ${
+                                selectedSubItem.episode_number_start === 0 ? 'active' : ''
+                              }`}
+                              onClick={() => void saveEpisodeNumberStart(0)}
+                            >
+                              0始まり
+                            </button>
+                            <button
+                              type="button"
+                              className={`ghost-button mode-toggle-button ${
+                                selectedSubItem.episode_number_start === 1 ? 'active' : ''
+                              }`}
+                              onClick={() => void saveEpisodeNumberStart(1)}
+                            >
+                              1始まり
+                            </button>
+                          </div>
+
                           <div className="episode-create-row">
                             <input
                               value={episodeTitle}
@@ -2298,7 +2344,7 @@ function App() {
                             {episodes.length === 0 ? (
                               <p className="subtle">話がまだありません。上で作成してください。</p>
                             ) : (
-                              episodes.map((episode) => (
+                              episodes.map((episode, index) => (
                                 <button
                                   key={episode.id}
                                   type="button"
@@ -2312,7 +2358,7 @@ function App() {
                                   onDrop={(event) => void dropSort('episode', episode.id, event)}
                                   onDragEnd={() => setDragState(null)}
                                 >
-                                  {episode.title}
+                                  {selectedSubItem.episode_number_start + index}. {episode.title}
                                 </button>
                               ))
                             )}

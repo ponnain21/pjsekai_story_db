@@ -31,6 +31,7 @@ create table if not exists public.threads (
   node_id uuid not null references public.nodes (id) on delete cascade,
   title text not null,
   has_episodes boolean not null default false,
+  episode_number_start integer not null default 1 check (episode_number_start in (0, 1)),
   scheduled_on date null,
   tags text[] not null default '{}',
   body text not null default '',
@@ -41,6 +42,8 @@ create table if not exists public.threads (
 alter table if exists public.threads
   add column if not exists has_episodes boolean not null default false;
 alter table if exists public.threads
+  add column if not exists episode_number_start integer not null default 1;
+alter table if exists public.threads
   add column if not exists scheduled_on date null;
 alter table if exists public.threads
   add column if not exists tags text[] not null default '{}';
@@ -48,6 +51,11 @@ alter table if exists public.threads
   add column if not exists body text not null default '';
 alter table if exists public.threads
   add column if not exists sort_order integer not null default 0;
+alter table if exists public.threads
+  drop constraint if exists threads_episode_number_start_check;
+alter table if exists public.threads
+  add constraint threads_episode_number_start_check
+  check (episode_number_start in (0, 1));
 
 create table if not exists public.subitem_episodes (
   id uuid primary key default gen_random_uuid(),
