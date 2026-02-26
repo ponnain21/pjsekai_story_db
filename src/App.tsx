@@ -2331,6 +2331,22 @@ function App() {
     })
   }
 
+  const deleteParsedRow = async (rowIndex: number) => {
+    const target = parsedLines[rowIndex]
+    if (!target) return
+
+    const nextBody = parsedLines
+      .filter((_, index) => index !== rowIndex)
+      .map((row) => (row.kind === 'direction' || row.kind === 'location' ? row.content : `${row.speaker}\n${row.content}`))
+      .join('\n\n')
+
+    await commitParserHistoryAction({
+      kind: 'replace_body_draft',
+      beforeBody: subItemBodyDraft,
+      afterBody: nextBody,
+    })
+  }
+
   const generateSpeechBalloonExport = () => {
     const parsed =
       parsedLines.length > 0
@@ -3051,6 +3067,13 @@ function App() {
                                       >
                                         除外語句に学習
                                       </button>
+                                      <button
+                                        type="button"
+                                        className="danger-button parsed-row-action"
+                                        onClick={() => void deleteParsedRow(index)}
+                                      >
+                                        この行を削除
+                                      </button>
                                       {sourceRuleEntry && (
                                         <button
                                           type="button"
@@ -3131,6 +3154,13 @@ function App() {
                                       onClick={() => void upsertFilterTerm(row.sourceLine, true)}
                                     >
                                       除外語句に学習
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="danger-button parsed-row-action"
+                                      onClick={() => void deleteParsedRow(index)}
+                                    >
+                                      この行を削除
                                     </button>
                                     {sourceRuleEntry && (
                                       <button
