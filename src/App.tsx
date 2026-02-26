@@ -62,6 +62,7 @@ type SpeakerProfileRow = {
 }
 
 type ParsedLineRow = {
+  kind: 'dialogue' | 'direction'
   speaker: string
   content: string
 }
@@ -87,12 +88,25 @@ const isMissingRelationError = (message: string) =>
   message.includes('relation') && message.includes('does not exist')
 
 const splitAndFilterLines = (rawText: string, blockedTerms: Set<string>) => {
-  return rawText
+  const normalizedLines = rawText
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .filter((line) => !blockedTerms.has(line))
+
+  let nonEmptyIndex = -1
+  return normalizedLines.filter((line) => {
+    if (!line) return false
+    nonEmptyIndex += 1
+
+    if (nonEmptyIndex < 2) {
+      const lowerLine = line.toLowerCase()
+      if (lowerLine.includes('sekai viewer') || lowerLine.includes('sekai vieweri') || line === '機能一覧') {
+        return false
+      }
+    }
+
+    return !blockedTerms.has(line)
+  })
 }
 
 const isLikelySpeakerLine = (line: string, nextLine: string | undefined, knownSpeakers: Set<string>) => {
@@ -106,52 +120,39 @@ const isLikelySpeakerLine = (line: string, nextLine: string | undefined, knownSp
   return true
 }
 
-const parseScriptLines = (rawText: string, blockedTerms: string[], speakerNames: string[]) => {
+const parseScriptLines = (
+  rawText: string,
+  blockedTerms: string[],
+  speakerNames: string[],
+) => {
   const blockedSet = new Set(blockedTerms.map((term) => term.trim()).filter(Boolean))
   const knownSpeakers = new Set(speakerNames.map((name) => name.trim()).filter(Boolean))
   const lines = splitAndFilterLines(rawText, blockedSet)
-
-  const pairRows: ParsedLineRow[] = []
-  for (let index = 0; index < lines.length; index += 2) {
-    const speaker = lines[index]?.trim() ?? ''
-    const content = lines[index + 1]?.trim() ?? ''
-    if (!speaker || !content) continue
-    pairRows.push({ speaker, content })
-  }
-
-  if (pairRows.length > 0) {
-    return pairRows
-  }
-
-  // Fallback parser when line pairing cannot be formed (e.g. skip count mismatch).
   const rows: ParsedLineRow[] = []
-
-  let currentSpeaker = ''
-  let contentBuffer: string[] = []
-  const flush = () => {
-    const content = contentBuffer.join('\n').trim()
-    if (!content) {
-      contentBuffer = []
-      return
-    }
-    rows.push({
-      speaker: currentSpeaker || 'ナレーション',
-      content,
-    })
-    contentBuffer = []
-  }
-
-  for (let index = 0; index < lines.length; index += 1) {
+  for (let index = 0; index < lines.length; ) {
     const line = lines[index]
     const nextLine = lines[index + 1]
-    if (isLikelySpeakerLine(line, nextLine, knownSpeakers)) {
-      flush()
-      currentSpeaker = line
+    const nextNextLine = lines[index + 2]
+    const lineIsSpeaker = isLikelySpeakerLine(line, nextLine, knownSpeakers)
+    const nextIsSpeaker = nextLine ? isLikelySpeakerLine(nextLine, nextNextLine, knownSpeakers) : false
+
+    if (lineIsSpeaker && nextLine && !nextIsSpeaker) {
+      rows.push({
+        kind: 'dialogue',
+        speaker: line,
+        content: nextLine,
+      })
+      index += 2
       continue
     }
-    contentBuffer.push(line)
+
+    rows.push({
+      kind: 'direction',
+      speaker: '',
+      content: line,
+    })
+    index += 1
   }
-  flush()
 
   return rows
 }
@@ -212,6 +213,7 @@ function App() {
   const [filterTermDraft, setFilterTermDraft] = useState('')
   const [speakerNameDraft, setSpeakerNameDraft] = useState('')
   const [speakerIconUrlDraft, setSpeakerIconUrlDraft] = useState('')
+  const [speakerIconFile, setSpeakerIconFile] = useState<File | null>(null)
   const [editingSpeakerProfileId, setEditingSpeakerProfileId] = useState<string | null>(null)
   const [parsedLines, setParsedLines] = useState<ParsedLineRow[]>([])
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
@@ -1257,6 +1259,7 @@ function App() {
   const clearSpeakerProfileDraft = () => {
     setSpeakerNameDraft('')
     setSpeakerIconUrlDraft('')
+    setSpeakerIconFile(null)
     setEditingSpeakerProfileId(null)
   }
 
@@ -1264,6 +1267,22 @@ function App() {
     setEditingSpeakerProfileId(profile.id)
     setSpeakerNameDraft(profile.name)
     setSpeakerIconUrlDraft(profile.icon_url ?? '')
+    setSpeakerIconFile(null)
+  }
+
+  const uploadSpeakerIcon = async (speakerName: string, file: File) => {
+    const safeSpeaker = speakerName.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40) || 'speaker'
+    const safeFile = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_')
+    const path = `${safeSpeaker}/${Date.now()}_${safeFile}`
+    const { error: uploadError } = await supabase.storage.from('speaker-icons').upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+    })
+    if (uploadError) {
+      throw uploadError
+    }
+    const { data } = supabase.storage.from('speaker-icons').getPublicUrl(path)
+    return data.publicUrl
   }
 
   const submitSpeakerProfile = async (event: FormEvent) => {
@@ -1275,9 +1294,25 @@ function App() {
       return
     }
 
+    let iconUrl: string | null = speakerIconUrlDraft.trim() || null
+    if (speakerIconFile) {
+      try {
+        iconUrl = await uploadSpeakerIcon(name, speakerIconFile)
+      } catch (uploadError) {
+        const message =
+          uploadError instanceof Error ? uploadError.message : 'アイコンアップロードに失敗しました。'
+        if (String(message).includes('Bucket not found')) {
+          setError('Storage バケット `speaker-icons` がありません。Supabase Storageで作成してください。')
+        } else {
+          setError(String(message))
+        }
+        return
+      }
+    }
+
     const payload = {
       name,
-      icon_url: speakerIconUrlDraft.trim() || null,
+      icon_url: iconUrl,
     }
 
     const { error: upsertError } = editingSpeakerProfileId
@@ -1322,7 +1357,9 @@ function App() {
 
     setError('')
     setParsedLines(parsed)
-    const formatted = parsed.map((row) => `${row.speaker}\n${row.content}`).join('\n\n')
+    const formatted = parsed
+      .map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`))
+      .join('\n\n')
     setSubItemBodyDraft(formatted)
   }
 
@@ -1542,6 +1579,15 @@ function App() {
                   onChange={(event) => setSpeakerIconUrlDraft(event.target.value)}
                   placeholder="アイコンURL（任意）"
                 />
+                <label className="stack-inline-file">
+                  画像ファイルをアップロード（任意）
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => setSpeakerIconFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p className="subtle">Storageバケット名は `speaker-icons` を使用します。</p>
                 {editingSpeakerProfileId && (
                   <button type="button" className="ghost-button" onClick={clearSpeakerProfileDraft}>
                     編集をキャンセル
@@ -1723,6 +1769,14 @@ function App() {
                         <div className="parsed-line-list">
                           {parsedLines.map((row, index) => {
                             const profile = speakerProfiles.find((speaker) => speaker.name === row.speaker) ?? null
+                            if (row.kind === 'direction') {
+                              return (
+                                <article key={`direction-${index}`} className="parsed-line-row parsed-line-row-direction">
+                                  <p className="parsed-direction-label">演出</p>
+                                  <p className="parsed-line-text">{row.content}</p>
+                                </article>
+                              )
+                            }
                             return (
                               <article key={`${row.speaker}-${index}`} className="parsed-line-row">
                                 <span className="speaker-avatar">

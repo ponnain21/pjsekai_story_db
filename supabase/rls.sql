@@ -8,6 +8,8 @@ alter table if exists public.subitem_episodes enable row level security;
 alter table if exists public.entries enable row level security;
 alter table if exists public.subitem_templates enable row level security;
 alter table if exists public.subitem_tag_presets enable row level security;
+alter table if exists public.parser_filter_terms enable row level security;
+alter table if exists public.speaker_profiles enable row level security;
 
 drop policy if exists "allowed_users_select_self" on public.allowed_users;
 create policy "allowed_users_select_self"
@@ -342,6 +344,116 @@ with check (
 drop policy if exists "subitem_tag_presets_delete_allowlisted" on public.subitem_tag_presets;
 create policy "subitem_tag_presets_delete_allowlisted"
 on public.subitem_tag_presets for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_filter_terms_select_allowlisted" on public.parser_filter_terms;
+create policy "parser_filter_terms_select_allowlisted"
+on public.parser_filter_terms for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_filter_terms_insert_allowlisted" on public.parser_filter_terms;
+create policy "parser_filter_terms_insert_allowlisted"
+on public.parser_filter_terms for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_filter_terms_update_allowlisted" on public.parser_filter_terms;
+create policy "parser_filter_terms_update_allowlisted"
+on public.parser_filter_terms for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "parser_filter_terms_delete_allowlisted" on public.parser_filter_terms;
+create policy "parser_filter_terms_delete_allowlisted"
+on public.parser_filter_terms for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "speaker_profiles_select_allowlisted" on public.speaker_profiles;
+create policy "speaker_profiles_select_allowlisted"
+on public.speaker_profiles for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "speaker_profiles_insert_allowlisted" on public.speaker_profiles;
+create policy "speaker_profiles_insert_allowlisted"
+on public.speaker_profiles for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "speaker_profiles_update_allowlisted" on public.speaker_profiles;
+create policy "speaker_profiles_update_allowlisted"
+on public.speaker_profiles for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "speaker_profiles_delete_allowlisted" on public.speaker_profiles;
+create policy "speaker_profiles_delete_allowlisted"
+on public.speaker_profiles for delete
 to authenticated
 using (
   exists (

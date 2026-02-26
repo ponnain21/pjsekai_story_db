@@ -84,6 +84,19 @@ create table if not exists public.subitem_tag_presets (
 alter table if exists public.subitem_tag_presets
   add column if not exists sort_order integer not null default 0;
 
+create table if not exists public.parser_filter_terms (
+  id uuid primary key default gen_random_uuid(),
+  term text not null unique,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.speaker_profiles (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  icon_url text null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.entries (
   id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references public.threads (id) on delete cascade,
@@ -101,4 +114,6 @@ create index if not exists idx_subitem_episodes_thread_id on public.subitem_epis
 create index if not exists idx_subitem_episodes_sort_order on public.subitem_episodes (sort_order);
 create index if not exists idx_subitem_templates_sort_order on public.subitem_templates (sort_order);
 create index if not exists idx_subitem_tag_presets_sort_order on public.subitem_tag_presets (sort_order);
+create index if not exists idx_parser_filter_terms_term on public.parser_filter_terms (term);
+create index if not exists idx_speaker_profiles_name on public.speaker_profiles (name);
 create index if not exists idx_entries_thread_id on public.entries (thread_id);
