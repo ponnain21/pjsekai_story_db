@@ -749,6 +749,14 @@
   padding: 1rem;
 }
 
+.overlay-priority {
+  z-index: 60;
+}
+
+.overlay-confirm {
+  z-index: 80;
+}
+
 .dialog-panel {
   width: min(34rem, 100%);
   background: #ffffff;
@@ -769,6 +777,13 @@
   flex-direction: column;
   gap: 0.35rem;
   font-size: 0.9rem;
+}
+
+.dialog-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
 }
 
 .dialog-confirm {

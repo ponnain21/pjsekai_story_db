@@ -3268,7 +3268,7 @@ function App() {
       </section>
 
       {presetDialog && (
-        <div className="overlay">
+        <div className="overlay overlay-priority">
           <form className="dialog-panel" onSubmit={onSubmitPresetDialogForm}>
             <h2>
               {presetDialog.kind === 'item'
@@ -3336,10 +3336,20 @@ function App() {
           >
             <h2>項目の設定</h2>
             <section className="dialog-field">
-              <span>項目タグ</span>
+              <div className="dialog-section-head">
+                <p className="subtle">項目タグ（並び替え: ドラッグ）</p>
+                <button
+                  type="button"
+                  className="ghost-button mini-action"
+                  onClick={() => openCreatePresetDialog('tag')}
+                  disabled={dialogBusy}
+                >
+                  ＋
+                </button>
+              </div>
               <div className="tag-picker">
                 {tagPresets.length === 0 ? (
-                  <p className="subtle">項目タグがありません。設定ページで作成してください。</p>
+                  <p className="subtle">項目タグがありません。＋で作成してください。</p>
                 ) : (
                   tagPresets.map((tag) => (
                     <button
@@ -3350,6 +3360,11 @@ function App() {
                       }`}
                       onClick={() => toggleItemSettingsTag(tag.name)}
                       disabled={dialogBusy}
+                      draggable
+                      onDragStart={(event) => startSortDrag('tag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('tag', tag.id, event)}
+                      onDrop={(event) => void dropSort('tag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {tag.name}
                     </button>
@@ -3374,10 +3389,20 @@ function App() {
             </section>
 
             <section className="dialog-field">
-              <span>項目内項目を追加</span>
+              <div className="dialog-section-head">
+                <p className="subtle">項目内項目を追加（並び替え: ドラッグ）</p>
+                <button
+                  type="button"
+                  className="ghost-button mini-action"
+                  onClick={() => openCreatePresetDialog('template')}
+                  disabled={dialogBusy}
+                >
+                  ＋
+                </button>
+              </div>
               <div className="template-button-list">
                 {subItemTemplates.length === 0 ? (
-                  <p className="subtle">項目内項目がありません。設定ページで作成してください。</p>
+                  <p className="subtle">項目内項目がありません。＋で作成してください。</p>
                 ) : (
                   subItemTemplates.map((template) => (
                     <button
@@ -3388,6 +3413,11 @@ function App() {
                       }`}
                       onClick={() => toggleItemSettingsTemplate(template.id)}
                       disabled={dialogBusy}
+                      draggable
+                      onDragStart={(event) => startSortDrag('template', template.id, event)}
+                      onDragOver={(event) => allowSortDrop('template', template.id, event)}
+                      onDrop={(event) => void dropSort('template', template.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {template.title}
                     </button>
@@ -3456,10 +3486,20 @@ function App() {
               />
             </label>
             <section className="dialog-field">
-              <span>各話タグ</span>
+              <div className="dialog-section-head">
+                <p className="subtle">各話タグ（並び替え: ドラッグ）</p>
+                <button
+                  type="button"
+                  className="ghost-button mini-action"
+                  onClick={() => openCreatePresetDialog('episodeTag')}
+                  disabled={dialogBusy}
+                >
+                  ＋
+                </button>
+              </div>
               <div className="template-button-list">
                 {episodeTagPresets.length === 0 ? (
-                  <p className="subtle">各話タグが未登録です（設定ページで追加できます）</p>
+                  <p className="subtle">各話タグがありません。＋で作成してください。</p>
                 ) : (
                   episodeTagPresets.map((tag) => (
                     <button
@@ -3470,6 +3510,11 @@ function App() {
                       }`}
                       onClick={() => toggleEpisodeSettingsTag(tag.name)}
                       disabled={dialogBusy}
+                      draggable
+                      onDragStart={(event) => startSortDrag('episodeTag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('episodeTag', tag.id, event)}
+                      onDrop={(event) => void dropSort('episodeTag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
                     >
                       {tag.name}
                     </button>
@@ -3510,7 +3555,7 @@ function App() {
       )}
 
       {confirmDialog && (
-        <div className="overlay">
+        <div className="overlay overlay-confirm">
           <section className="dialog-panel dialog-confirm">
             <h2>{confirmDialog.title}</h2>
             <p className="subtle">{confirmDialog.message}</p>
