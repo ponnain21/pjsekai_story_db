@@ -8,6 +8,8 @@ alter table if exists public.subitem_episodes enable row level security;
 alter table if exists public.entries enable row level security;
 alter table if exists public.subitem_templates enable row level security;
 alter table if exists public.subitem_tag_presets enable row level security;
+alter table if exists public.episode_tag_presets enable row level security;
+alter table if exists public.body_tag_presets enable row level security;
 alter table if exists public.parser_filter_terms enable row level security;
 alter table if exists public.parser_line_classifications enable row level security;
 alter table if exists public.speaker_profiles enable row level security;
@@ -345,6 +347,116 @@ with check (
 drop policy if exists "subitem_tag_presets_delete_allowlisted" on public.subitem_tag_presets;
 create policy "subitem_tag_presets_delete_allowlisted"
 on public.subitem_tag_presets for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "episode_tag_presets_select_allowlisted" on public.episode_tag_presets;
+create policy "episode_tag_presets_select_allowlisted"
+on public.episode_tag_presets for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "episode_tag_presets_insert_allowlisted" on public.episode_tag_presets;
+create policy "episode_tag_presets_insert_allowlisted"
+on public.episode_tag_presets for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "episode_tag_presets_update_allowlisted" on public.episode_tag_presets;
+create policy "episode_tag_presets_update_allowlisted"
+on public.episode_tag_presets for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "episode_tag_presets_delete_allowlisted" on public.episode_tag_presets;
+create policy "episode_tag_presets_delete_allowlisted"
+on public.episode_tag_presets for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_presets_select_allowlisted" on public.body_tag_presets;
+create policy "body_tag_presets_select_allowlisted"
+on public.body_tag_presets for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_presets_insert_allowlisted" on public.body_tag_presets;
+create policy "body_tag_presets_insert_allowlisted"
+on public.body_tag_presets for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_presets_update_allowlisted" on public.body_tag_presets;
+create policy "body_tag_presets_update_allowlisted"
+on public.body_tag_presets for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.allowed_users au
+    where au.email = lower(auth.jwt() ->> 'email')
+  )
+);
+
+drop policy if exists "body_tag_presets_delete_allowlisted" on public.body_tag_presets;
+create policy "body_tag_presets_delete_allowlisted"
+on public.body_tag_presets for delete
 to authenticated
 using (
   exists (

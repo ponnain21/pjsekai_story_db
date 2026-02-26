@@ -75,6 +75,8 @@ create table if not exists public.subitem_episodes (
   id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references public.threads (id) on delete cascade,
   title text not null,
+  label text null,
+  tags text[] not null default '{}',
   body text not null default '',
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
@@ -82,6 +84,10 @@ create table if not exists public.subitem_episodes (
 
 alter table if exists public.subitem_episodes
   add column if not exists sort_order integer not null default 0;
+alter table if exists public.subitem_episodes
+  add column if not exists label text null;
+alter table if exists public.subitem_episodes
+  add column if not exists tags text[] not null default '{}';
 
 create table if not exists public.subitem_templates (
   id uuid primary key default gen_random_uuid(),
@@ -104,6 +110,26 @@ create table if not exists public.subitem_tag_presets (
 );
 
 alter table if exists public.subitem_tag_presets
+  add column if not exists sort_order integer not null default 0;
+
+create table if not exists public.episode_tag_presets (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table if exists public.episode_tag_presets
+  add column if not exists sort_order integer not null default 0;
+
+create table if not exists public.body_tag_presets (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table if exists public.body_tag_presets
   add column if not exists sort_order integer not null default 0;
 
 create table if not exists public.parser_filter_terms (
@@ -151,8 +177,11 @@ create index if not exists idx_threads_node_id on public.threads (node_id);
 create index if not exists idx_threads_sort_order on public.threads (sort_order);
 create index if not exists idx_subitem_episodes_thread_id on public.subitem_episodes (thread_id);
 create index if not exists idx_subitem_episodes_sort_order on public.subitem_episodes (sort_order);
+create index if not exists idx_subitem_episodes_tags_gin on public.subitem_episodes using gin (tags);
 create index if not exists idx_subitem_templates_sort_order on public.subitem_templates (sort_order);
 create index if not exists idx_subitem_tag_presets_sort_order on public.subitem_tag_presets (sort_order);
+create index if not exists idx_episode_tag_presets_sort_order on public.episode_tag_presets (sort_order);
+create index if not exists idx_body_tag_presets_sort_order on public.body_tag_presets (sort_order);
 create index if not exists idx_parser_filter_terms_term on public.parser_filter_terms (term);
 create index if not exists idx_parser_line_classifications_line_text on public.parser_line_classifications (line_text);
 create index if not exists idx_speaker_profiles_name on public.speaker_profiles (name);

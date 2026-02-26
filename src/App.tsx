@@ -33,6 +33,8 @@ type EpisodeRow = {
   id: string
   thread_id: string
   title: string
+  label: string | null
+  tags: string[] | null
   body: string
   sort_order: number
   created_at: string
@@ -46,6 +48,20 @@ type SubItemTemplateRow = {
 }
 
 type TagPresetRow = {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+}
+
+type EpisodeTagPresetRow = {
+  id: string
+  name: string
+  sort_order: number
+  created_at: string
+}
+
+type BodyTagPresetRow = {
   id: string
   name: string
   sort_order: number
@@ -106,10 +122,10 @@ type ParsedLineRow = {
   sourceRule: LineClassification | null
 }
 
-type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag'
+type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag' | 'episodeTag' | 'bodyTag'
 
 type PresetDialogState = {
-  kind: 'item' | 'template' | 'tag'
+  kind: 'item' | 'template' | 'tag' | 'episodeTag' | 'bodyTag'
   mode: 'create' | 'edit'
   id: string | null
 }
@@ -119,6 +135,12 @@ type ConfirmDialogState = {
   message: string
   confirmLabel: string
   onConfirm: () => Promise<void>
+}
+
+type EpisodeSettingsDialogState = {
+  episodeId: string
+  labelDraft: string
+  selectedTags: string[]
 }
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
@@ -189,6 +211,19 @@ const splitSpeakerAndDialogueFromSingleLine = (line: string) => {
 
 const formatParsedRowsToBody = (rows: ParsedLineRow[]) =>
   rows.map((row) => (row.kind === 'dialogue' ? `${row.speaker}\n${row.content}` : row.content)).join('\n\n')
+
+const getEpisodeDisplayLabel = (
+  episode: EpisodeRow,
+  index: number,
+  episodeNumberStart: number,
+  legacyLabels: string[],
+) => {
+  const directLabel = (episode.label ?? '').trim()
+  if (directLabel) return directLabel
+  const legacyLabel = (legacyLabels[index] ?? '').trim()
+  if (legacyLabel) return legacyLabel
+  return `${episodeNumberStart + index}.`
+}
 
 const isEditableTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) return false
@@ -315,6 +350,8 @@ function App() {
   const [episodes, setEpisodes] = useState<EpisodeRow[]>([])
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
   const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
+  const [episodeTagPresets, setEpisodeTagPresets] = useState<EpisodeTagPresetRow[]>([])
+  const [bodyTagPresets, setBodyTagPresets] = useState<BodyTagPresetRow[]>([])
   const [filterTerms, setFilterTerms] = useState<FilterTermRow[]>([])
   const [lineRules, setLineRules] = useState<ParserLineRuleRow[]>([])
   const [speakerProfiles, setSpeakerProfiles] = useState<SpeakerProfileRow[]>([])
@@ -322,6 +359,8 @@ function App() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
   const [selectedSettingsTagId, setSelectedSettingsTagId] = useState<string | null>(null)
+  const [selectedSettingsEpisodeTagId, setSelectedSettingsEpisodeTagId] = useState<string | null>(null)
+  const [selectedSettingsBodyTagId, setSelectedSettingsBodyTagId] = useState<string | null>(null)
   const [selectedSubItemId, setSelectedSubItemId] = useState<string | null>(null)
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null)
 
@@ -332,7 +371,6 @@ function App() {
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [episodeTitle, setEpisodeTitle] = useState('')
-  const [episodeLabelsDraft, setEpisodeLabelsDraft] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
   const [filterTermDraft, setFilterTermDraft] = useState('')
   const [speakerNameDraft, setSpeakerNameDraft] = useState('')
@@ -346,6 +384,7 @@ function App() {
   const [parserRedoStack, setParserRedoStack] = useState<ParserHistoryAction[]>([])
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
+  const [episodeSettingsDialog, setEpisodeSettingsDialog] = useState<EpisodeSettingsDialogState | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dragState, setDragState] = useState<{ kind: SortableKind; id: string } | null>(null)
@@ -391,10 +430,6 @@ function App() {
     setParserUndoStack([])
     setParserRedoStack([])
   }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedSubItem?.body, selectedEpisode?.id, selectedEpisode?.body])
-
-  useEffect(() => {
-    setEpisodeLabelsDraft((selectedSubItem?.episode_labels ?? []).join('\n'))
-  }, [selectedSubItem?.id, selectedSubItem?.episode_labels])
 
   useEffect(() => {
     if (pageMode === 'subitemBody' && !selectedSubItemId) {
@@ -606,12 +641,40 @@ function App() {
   const loadEpisodes = async (subItemId: string) => {
     const { data, error: loadError } = await supabase
       .from('subitem_episodes')
-      .select('id, thread_id, title, body, sort_order, created_at')
+      .select('id, thread_id, title, label, tags, body, sort_order, created_at')
       .eq('thread_id', subItemId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
+      if (loadError.message.includes('label') || loadError.message.includes('tags')) {
+        const { data: partialData, error: partialError } = await supabase
+          .from('subitem_episodes')
+          .select('id, thread_id, title, body, sort_order, created_at')
+          .eq('thread_id', subItemId)
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true })
+
+        if (partialError) {
+          setError(partialError.message)
+          return
+        }
+
+        const fallbackEpisodes = (
+          (partialData ?? []) as Omit<EpisodeRow, 'label' | 'tags'>[]
+        ).map((episode) => ({
+          ...episode,
+          label: null,
+          tags: [],
+        }))
+        setEpisodes(fallbackEpisodes)
+        setSelectedEpisodeId((current) => {
+          if (current && fallbackEpisodes.some((episode) => episode.id === current)) return current
+          return fallbackEpisodes[0]?.id ?? null
+        })
+        return
+      }
+
       setError(loadError.message)
       return
     }
@@ -698,6 +761,60 @@ function App() {
     applyLoadedTags((data ?? []) as TagPresetRow[])
   }
 
+  const loadEpisodeTagPresets = async () => {
+    const applyLoadedTags = (loadedTags: EpisodeTagPresetRow[]) => {
+      setEpisodeTagPresets(loadedTags)
+      setSelectedSettingsEpisodeTagId((current) => {
+        if (current && loadedTags.some((tag) => tag.id === current)) return current
+        return null
+      })
+    }
+
+    const { data, error: loadError } = await supabase
+      .from('episode_tag_presets')
+      .select('id, name, sort_order, created_at')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setEpisodeTagPresets([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    applyLoadedTags((data ?? []) as EpisodeTagPresetRow[])
+  }
+
+  const loadBodyTagPresets = async () => {
+    const applyLoadedTags = (loadedTags: BodyTagPresetRow[]) => {
+      setBodyTagPresets(loadedTags)
+      setSelectedSettingsBodyTagId((current) => {
+        if (current && loadedTags.some((tag) => tag.id === current)) return current
+        return null
+      })
+    }
+
+    const { data, error: loadError } = await supabase
+      .from('body_tag_presets')
+      .select('id, name, sort_order, created_at')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setBodyTagPresets([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    applyLoadedTags((data ?? []) as BodyTagPresetRow[])
+  }
+
   const loadFilterTerms = async () => {
     const { data, error: loadError } = await supabase
       .from('parser_filter_terms')
@@ -776,12 +893,16 @@ function App() {
       setEpisodes([])
       setSubItemTemplates([])
       setTagPresets([])
+      setEpisodeTagPresets([])
+      setBodyTagPresets([])
       setFilterTerms([])
       setLineRules([])
       setSpeakerProfiles([])
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
       setSelectedSettingsTagId(null)
+      setSelectedSettingsEpisodeTagId(null)
+      setSelectedSettingsBodyTagId(null)
       setSelectedSubItemId(null)
       setSelectedEpisodeId(null)
       setEditingSpeakerProfileId(null)
@@ -794,6 +915,8 @@ function App() {
     void loadItems()
     void loadSubItemTemplates()
     void loadTagPresets()
+    void loadEpisodeTagPresets()
+    void loadBodyTagPresets()
     void loadFilterTerms()
     void loadLineRules()
     void loadSpeakerProfiles()
@@ -975,7 +1098,14 @@ function App() {
   }
 
   const persistSortOrder = async (
-    table: 'nodes' | 'threads' | 'subitem_episodes' | 'subitem_templates' | 'subitem_tag_presets',
+    table:
+      | 'nodes'
+      | 'threads'
+      | 'subitem_episodes'
+      | 'subitem_templates'
+      | 'subitem_tag_presets'
+      | 'episode_tag_presets'
+      | 'body_tag_presets',
     orderedIds: string[],
   ) => {
     for (let index = 0; index < orderedIds.length; index += 1) {
@@ -1048,6 +1178,26 @@ function App() {
     if (!ok) await loadTagPresets()
   }
 
+  const reorderEpisodeTags = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(episodeTagPresets, draggedId, targetId)
+    setEpisodeTagPresets(reordered)
+    const ok = await persistSortOrder(
+      'episode_tag_presets',
+      reordered.map((row) => row.id),
+    )
+    if (!ok) await loadEpisodeTagPresets()
+  }
+
+  const reorderBodyTags = async (draggedId: string, targetId: string) => {
+    const reordered = reorderRowsByIds(bodyTagPresets, draggedId, targetId)
+    setBodyTagPresets(reordered)
+    const ok = await persistSortOrder(
+      'body_tag_presets',
+      reordered.map((row) => row.id),
+    )
+    if (!ok) await loadBodyTagPresets()
+  }
+
   const startSortDrag = (kind: SortableKind, id: string, event: DragEvent<HTMLElement>) => {
     setDragState({ kind, id })
     event.dataTransfer.effectAllowed = 'move'
@@ -1069,6 +1219,8 @@ function App() {
     if (kind === 'episode') await reorderEpisodes(dragState.id, targetId)
     if (kind === 'template') await reorderTemplates(dragState.id, targetId)
     if (kind === 'tag') await reorderTags(dragState.id, targetId)
+    if (kind === 'episodeTag') await reorderEpisodeTags(dragState.id, targetId)
+    if (kind === 'bodyTag') await reorderBodyTags(dragState.id, targetId)
 
     setDragState(null)
   }
@@ -1088,12 +1240,12 @@ function App() {
     }
   }
 
-  const openCreatePresetDialog = (kind: 'template' | 'tag') => {
+  const openCreatePresetDialog = (kind: 'template' | 'tag' | 'episodeTag' | 'bodyTag') => {
     setPresetNameDraft('')
     setPresetDialog({ kind, mode: 'create', id: null })
   }
 
-  const openEditPresetDialog = (kind: 'item' | 'template' | 'tag', id: string) => {
+  const openEditPresetDialog = (kind: 'item' | 'template' | 'tag' | 'episodeTag' | 'bodyTag', id: string) => {
     if (kind === 'item') {
       const item = items.find((current) => current.id === id)
       if (!item) return
@@ -1112,11 +1264,29 @@ function App() {
       return
     }
 
-    const tag = tagPresets.find((current) => current.id === id)
+    if (kind === 'tag') {
+      const tag = tagPresets.find((current) => current.id === id)
+      if (!tag) return
+      setSelectedSettingsTagId(tag.id)
+      setPresetNameDraft(tag.name)
+      setPresetDialog({ kind: 'tag', mode: 'edit', id: tag.id })
+      return
+    }
+
+    if (kind === 'episodeTag') {
+      const tag = episodeTagPresets.find((current) => current.id === id)
+      if (!tag) return
+      setSelectedSettingsEpisodeTagId(tag.id)
+      setPresetNameDraft(tag.name)
+      setPresetDialog({ kind: 'episodeTag', mode: 'edit', id: tag.id })
+      return
+    }
+
+    const tag = bodyTagPresets.find((current) => current.id === id)
     if (!tag) return
-    setSelectedSettingsTagId(tag.id)
+    setSelectedSettingsBodyTagId(tag.id)
     setPresetNameDraft(tag.name)
-    setPresetDialog({ kind: 'tag', mode: 'edit', id: tag.id })
+    setPresetDialog({ kind: 'bodyTag', mode: 'edit', id: tag.id })
   }
 
   const submitPresetDialog = async () => {
@@ -1182,7 +1352,7 @@ function App() {
           }
           await loadSubItemTemplates()
         }
-      } else {
+      } else if (presetDialog.kind === 'tag') {
         if (presetDialog.mode === 'create') {
           const nextSortOrder = tagPresets.length === 0 ? 0 : Math.max(...tagPresets.map((tag) => tag.sort_order)) + 1
           const { data, error: insertError } = await supabase
@@ -1214,6 +1384,74 @@ function App() {
             return
           }
           await loadTagPresets()
+        }
+      } else if (presetDialog.kind === 'episodeTag') {
+        if (presetDialog.mode === 'create') {
+          const nextSortOrder =
+            episodeTagPresets.length === 0 ? 0 : Math.max(...episodeTagPresets.map((tag) => tag.sort_order)) + 1
+          const { data, error: insertError } = await supabase
+            .from('episode_tag_presets')
+            .upsert({ name: trimmed, sort_order: nextSortOrder }, { onConflict: 'name' })
+            .select('id')
+            .single()
+          if (insertError) {
+            if (insertError.message.includes('sort_order')) {
+              setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+            } else {
+              setError(insertError.message)
+            }
+            return
+          }
+          await loadEpisodeTagPresets()
+          if (data?.id) setSelectedSettingsEpisodeTagId(data.id)
+        } else {
+          if (!presetDialog.id) {
+            setError('更新する各話タグが見つかりません。')
+            return
+          }
+          const { error: updateError } = await supabase
+            .from('episode_tag_presets')
+            .update({ name: trimmed })
+            .eq('id', presetDialog.id)
+          if (updateError) {
+            setError(updateError.message)
+            return
+          }
+          await loadEpisodeTagPresets()
+        }
+      } else {
+        if (presetDialog.mode === 'create') {
+          const nextSortOrder =
+            bodyTagPresets.length === 0 ? 0 : Math.max(...bodyTagPresets.map((tag) => tag.sort_order)) + 1
+          const { data, error: insertError } = await supabase
+            .from('body_tag_presets')
+            .upsert({ name: trimmed, sort_order: nextSortOrder }, { onConflict: 'name' })
+            .select('id')
+            .single()
+          if (insertError) {
+            if (insertError.message.includes('sort_order')) {
+              setError('sort_order 列が必要です。supabase/schema.sql を実行してください。')
+            } else {
+              setError(insertError.message)
+            }
+            return
+          }
+          await loadBodyTagPresets()
+          if (data?.id) setSelectedSettingsBodyTagId(data.id)
+        } else {
+          if (!presetDialog.id) {
+            setError('更新する本文タグが見つかりません。')
+            return
+          }
+          const { error: updateError } = await supabase
+            .from('body_tag_presets')
+            .update({ name: trimmed })
+            .eq('id', presetDialog.id)
+          if (updateError) {
+            setError(updateError.message)
+            return
+          }
+          await loadBodyTagPresets()
         }
       }
 
@@ -1266,22 +1504,65 @@ function App() {
       return
     }
 
-    const tag = tagPresets.find((current) => current.id === presetDialog.id)
-    if (!tag) return
+    if (presetDialog.kind === 'tag') {
+      const tag = tagPresets.find((current) => current.id === presetDialog.id)
+      if (!tag) return
+      openConfirmDialog({
+        title: 'タグの削除',
+        message: `「${tag.name}」を削除します。`,
+        confirmLabel: '削除する',
+        onConfirm: async () => {
+          const { error: deleteError } = await supabase.from('subitem_tag_presets').delete().eq('id', tag.id)
+          if (deleteError) {
+            setError(deleteError.message)
+            return
+          }
+          await loadTagPresets()
+          const nextTags = mainSelectedTags.filter((name) => name !== tag.name)
+          setMainSelectedTags(nextTags)
+          await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
+          setPresetDialog(null)
+        },
+      })
+      return
+    }
+
+    if (presetDialog.kind === 'episodeTag') {
+      const tag = episodeTagPresets.find((current) => current.id === presetDialog.id)
+      if (!tag) return
+      openConfirmDialog({
+        title: '各話タグの削除',
+        message: `「${tag.name}」を削除します。`,
+        confirmLabel: '削除する',
+        onConfirm: async () => {
+          const { error: deleteError } = await supabase.from('episode_tag_presets').delete().eq('id', tag.id)
+          if (deleteError) {
+            setError(deleteError.message)
+            return
+          }
+          await loadEpisodeTagPresets()
+          setEpisodeSettingsDialog((current) =>
+            current ? { ...current, selectedTags: current.selectedTags.filter((name) => name !== tag.name) } : current,
+          )
+          setPresetDialog(null)
+        },
+      })
+      return
+    }
+
+    const bodyTag = bodyTagPresets.find((current) => current.id === presetDialog.id)
+    if (!bodyTag) return
     openConfirmDialog({
-      title: 'タグの削除',
-      message: `「${tag.name}」を削除します。`,
+      title: '本文タグの削除',
+      message: `「${bodyTag.name}」を削除します。`,
       confirmLabel: '削除する',
       onConfirm: async () => {
-        const { error: deleteError } = await supabase.from('subitem_tag_presets').delete().eq('id', tag.id)
+        const { error: deleteError } = await supabase.from('body_tag_presets').delete().eq('id', bodyTag.id)
         if (deleteError) {
           setError(deleteError.message)
           return
         }
-        await loadTagPresets()
-        const nextTags = mainSelectedTags.filter((name) => name !== tag.name)
-        setMainSelectedTags(nextTags)
-        await saveItemMeta(mainScheduledFrom, mainScheduledTo, nextTags)
+        await loadBodyTagPresets()
         setPresetDialog(null)
       },
     })
@@ -1358,31 +1639,55 @@ function App() {
     if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
-  const saveEpisodeLabels = async () => {
-    if (!selectedSubItem) return
-    setError('')
+  const openEpisodeSettings = (episode: EpisodeRow) => {
+    setSelectedEpisodeId(episode.id)
+    setEpisodeSettingsDialog({
+      episodeId: episode.id,
+      labelDraft: episode.label ?? '',
+      selectedTags: uniqueStrings(episode.tags ?? []),
+    })
+  }
 
-    const labels = episodeLabelsDraft
-      .replace(/\r\n?/g, '\n')
-      .split('\n')
-      .map((label) => label.trim())
-      .filter(Boolean)
-
-    const { error: updateError } = await supabase
-      .from('threads')
-      .update({ episode_labels: labels })
-      .eq('id', selectedSubItem.id)
-
-    if (updateError) {
-      if (updateError.message.includes('episode_labels')) {
-        setError('threads テーブルに episode_labels 列が必要です。supabase/schema.sql を実行してください。')
-      } else {
-        setError(updateError.message)
+  const toggleEpisodeSettingsTag = (tagName: string) => {
+    setEpisodeSettingsDialog((current) => {
+      if (!current) return current
+      if (current.selectedTags.includes(tagName)) {
+        return { ...current, selectedTags: current.selectedTags.filter((name) => name !== tagName) }
       }
-      return
-    }
+      return { ...current, selectedTags: uniqueStrings([...current.selectedTags, tagName]) }
+    })
+  }
 
-    if (selectedItemId) await loadSubItems(selectedItemId)
+  const saveEpisodeSettingsDialog = async () => {
+    if (!episodeSettingsDialog || !selectedSubItemId || dialogBusy) return
+    setError('')
+    setDialogBusy(true)
+
+    try {
+      const label = episodeSettingsDialog.labelDraft.trim()
+      const tags = uniqueStrings(episodeSettingsDialog.selectedTags)
+      const { error: updateError } = await supabase
+        .from('subitem_episodes')
+        .update({
+          label: label || null,
+          tags,
+        })
+        .eq('id', episodeSettingsDialog.episodeId)
+
+      if (updateError) {
+        if (updateError.message.includes('label') || updateError.message.includes('tags')) {
+          setError('subitem_episodes テーブルに label / tags 列が必要です。supabase/schema.sql を実行してください。')
+        } else {
+          setError(updateError.message)
+        }
+        return
+      }
+
+      await loadEpisodes(selectedSubItemId)
+      setEpisodeSettingsDialog(null)
+    } finally {
+      setDialogBusy(false)
+    }
   }
 
   const addEpisode = async () => {
@@ -1408,6 +1713,8 @@ function App() {
       .insert({
         thread_id: selectedSubItem.id,
         title: trimmedTitle,
+        label: null,
+        tags: [],
         body: '',
         sort_order: nextSortOrder,
       })
@@ -1415,6 +1722,28 @@ function App() {
       .single()
 
     if (insertError) {
+      if (insertError.message.includes('label') || insertError.message.includes('tags')) {
+        const { data: legacyData, error: legacyError } = await supabase
+          .from('subitem_episodes')
+          .insert({
+            thread_id: selectedSubItem.id,
+            title: trimmedTitle,
+            body: '',
+            sort_order: nextSortOrder,
+          })
+          .select('id')
+          .single()
+
+        if (legacyError) {
+          setError(legacyError.message)
+          return
+        }
+
+        setEpisodeTitle('')
+        await loadEpisodes(selectedSubItem.id)
+        if (legacyData?.id) setSelectedEpisodeId(legacyData.id)
+        return
+      }
       setError(insertError.message)
       return
     }
@@ -1517,6 +1846,22 @@ function App() {
       return
     }
     setSelectedSettingsTagId(tag.id)
+  }
+
+  const handleSettingsEpisodeTagButton = (tag: EpisodeTagPresetRow) => {
+    if (selectedSettingsEpisodeTagId === tag.id) {
+      openEditPresetDialog('episodeTag', tag.id)
+      return
+    }
+    setSelectedSettingsEpisodeTagId(tag.id)
+  }
+
+  const handleSettingsBodyTagButton = (tag: BodyTagPresetRow) => {
+    if (selectedSettingsBodyTagId === tag.id) {
+      openEditPresetDialog('bodyTag', tag.id)
+      return
+    }
+    setSelectedSettingsBodyTagId(tag.id)
   }
 
   const handleMainTagButton = async (tag: TagPresetRow) => {
@@ -2208,6 +2553,67 @@ function App() {
             </section>
 
             <section className="settings-section">
+              <h3>各話タグ設定</h3>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('episodeTag')}>
+                ＋ 各話タグを作成
+              </button>
+              <div className="template-button-list">
+                {episodeTagPresets.length === 0 ? (
+                  <p className="subtle">各話タグはまだありません</p>
+                ) : (
+                  episodeTagPresets.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`ghost-button template-button ${
+                        selectedSettingsEpisodeTagId === tag.id ? 'active' : ''
+                      } ${dragState?.kind === 'episodeTag' && dragState.id === tag.id ? 'dragging' : ''}`}
+                      onClick={() => handleSettingsEpisodeTagButton(tag)}
+                      draggable
+                      onDragStart={(event) => startSortDrag('episodeTag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('episodeTag', tag.id, event)}
+                      onDrop={(event) => void dropSort('episodeTag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
+                    >
+                      {tag.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h3>本文タグ設定</h3>
+              <p className="subtle">将来の本文内テキストタグ付け用プリセットです。</p>
+              <button type="button" className="ghost-button" onClick={() => openCreatePresetDialog('bodyTag')}>
+                ＋ 本文タグを作成
+              </button>
+              <div className="template-button-list">
+                {bodyTagPresets.length === 0 ? (
+                  <p className="subtle">本文タグはまだありません</p>
+                ) : (
+                  bodyTagPresets.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`ghost-button template-button ${
+                        selectedSettingsBodyTagId === tag.id ? 'active' : ''
+                      } ${dragState?.kind === 'bodyTag' && dragState.id === tag.id ? 'dragging' : ''}`}
+                      onClick={() => handleSettingsBodyTagButton(tag)}
+                      draggable
+                      onDragStart={(event) => startSortDrag('bodyTag', tag.id, event)}
+                      onDragOver={(event) => allowSortDrop('bodyTag', tag.id, event)}
+                      onDrop={(event) => void dropSort('bodyTag', tag.id, event)}
+                      onDragEnd={() => setDragState(null)}
+                    >
+                      {tag.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="settings-section">
               <h3>除去語句設定</h3>
               <p className="subtle">本文解析時に、行がこの語句と完全一致した場合は除去します。</p>
               <form className="settings-inline-form" onSubmit={submitFilterTerm}>
@@ -2450,20 +2856,6 @@ function App() {
 
                       {selectedSubItem.has_episodes ? (
                         <>
-                          <label className="stack-inline-file">
-                            話ラベル（任意・1行につき1つ。例: 前編 / 後編）
-                            <textarea
-                              value={episodeLabelsDraft}
-                              onChange={(event) => setEpisodeLabelsDraft(event.target.value)}
-                              placeholder={'前編\n後編'}
-                            />
-                          </label>
-                          <div className="body-editor-actions">
-                            <button type="button" className="ghost-button" onClick={() => void saveEpisodeLabels()}>
-                              話ラベルを保存
-                            </button>
-                          </div>
-
                           <div className="episode-create-row">
                             <input
                               value={episodeTitle}
@@ -2479,25 +2871,47 @@ function App() {
                             {episodes.length === 0 ? (
                               <p className="subtle">話がまだありません。上で作成してください。</p>
                             ) : (
-                              episodes.map((episode, index) => (
-                                <button
-                                  key={episode.id}
-                                  type="button"
-                                  className={`list-item episode-list-item ${selectedEpisodeId === episode.id ? 'active' : ''} ${
-                                    dragState?.kind === 'episode' && dragState.id === episode.id ? 'dragging' : ''
-                                  }`}
-                                  onClick={() => setSelectedEpisodeId(episode.id)}
-                                  draggable
-                                  onDragStart={(event) => startSortDrag('episode', episode.id, event)}
-                                  onDragOver={(event) => allowSortDrop('episode', episode.id, event)}
-                                  onDrop={(event) => void dropSort('episode', episode.id, event)}
-                                  onDragEnd={() => setDragState(null)}
-                                >
-                                  {((selectedSubItem.episode_labels[index] ?? '').trim() ||
-                                    `${selectedSubItem.episode_number_start + index}.`)}{' '}
-                                  {episode.title}
-                                </button>
-                              ))
+                              episodes.map((episode, index) => {
+                                const episodeLabel = getEpisodeDisplayLabel(
+                                  episode,
+                                  index,
+                                  selectedSubItem.episode_number_start,
+                                  selectedSubItem.episode_labels ?? [],
+                                )
+                                return (
+                                  <div
+                                    key={episode.id}
+                                    className={`episode-row ${
+                                      dragState?.kind === 'episode' && dragState.id === episode.id ? 'dragging' : ''
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className={`list-item episode-list-item ${selectedEpisodeId === episode.id ? 'active' : ''}`}
+                                      onClick={() => setSelectedEpisodeId(episode.id)}
+                                      draggable
+                                      onDragStart={(event) => startSortDrag('episode', episode.id, event)}
+                                      onDragOver={(event) => allowSortDrop('episode', episode.id, event)}
+                                      onDrop={(event) => void dropSort('episode', episode.id, event)}
+                                      onDragEnd={() => setDragState(null)}
+                                    >
+                                      <span className="episode-row-title">
+                                        {episodeLabel} {episode.title}
+                                      </span>
+                                      {episode.tags && episode.tags.length > 0 && (
+                                        <span className="episode-row-tags">{episode.tags.join(' / ')}</span>
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost-button mini-action episode-settings-button"
+                                      onClick={() => openEpisodeSettings(episode)}
+                                    >
+                                      設定
+                                    </button>
+                                  </div>
+                                )
+                              })
                             )}
                           </div>
 
@@ -2941,9 +3355,17 @@ function App() {
                 ? presetDialog.mode === 'create'
                   ? '項目内項目を作成'
                   : '項目内項目の詳細設定'
+                : presetDialog.kind === 'tag'
+                ? presetDialog.mode === 'create'
+                  ? '項目タグを作成'
+                  : '項目タグの詳細設定'
+                : presetDialog.kind === 'episodeTag'
+                ? presetDialog.mode === 'create'
+                  ? '各話タグを作成'
+                  : '各話タグの詳細設定'
                 : presetDialog.mode === 'create'
-                  ? 'タグを作成'
-                  : 'タグの詳細設定'}
+                ? '本文タグを作成'
+                : '本文タグの詳細設定'}
             </h2>
             <label className="dialog-field">
               {presetDialog.kind === 'item' ? '項目名' : '名称'}
@@ -2975,6 +3397,83 @@ function App() {
               )}
               <button type="submit" disabled={dialogBusy}>
                 {presetDialog.mode === 'create' ? '作成' : '保存'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {episodeSettingsDialog && (
+        <div className="overlay">
+          <form
+            className="dialog-panel"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveEpisodeSettingsDialog()
+            }}
+          >
+            <h2>話の設定</h2>
+            <label className="dialog-field">
+              話ラベル（任意）
+              <input
+                value={episodeSettingsDialog.labelDraft}
+                onChange={(event) =>
+                  setEpisodeSettingsDialog((current) =>
+                    current ? { ...current, labelDraft: event.target.value } : current,
+                  )
+                }
+                placeholder="例: 前編 / 後編 / 第0話"
+                disabled={dialogBusy}
+              />
+            </label>
+            <section className="dialog-field">
+              <span>各話タグ</span>
+              <div className="template-button-list">
+                {episodeTagPresets.length === 0 ? (
+                  <p className="subtle">各話タグが未登録です（設定ページで追加できます）</p>
+                ) : (
+                  episodeTagPresets.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`ghost-button template-button ${
+                        episodeSettingsDialog.selectedTags.includes(tag.name) ? 'active' : ''
+                      }`}
+                      onClick={() => toggleEpisodeSettingsTag(tag.name)}
+                      disabled={dialogBusy}
+                    >
+                      {tag.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+            {episodeSettingsDialog.selectedTags.length > 0 && (
+              <div className="selected-tag-list">
+                {episodeSettingsDialog.selectedTags.map((tagName) => (
+                  <button
+                    key={tagName}
+                    type="button"
+                    className="selected-tag-chip"
+                    onClick={() => toggleEpisodeSettingsTag(tagName)}
+                    disabled={dialogBusy}
+                  >
+                    {tagName} ×
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setEpisodeSettingsDialog(null)}
+                disabled={dialogBusy}
+              >
+                閉じる
+              </button>
+              <button type="submit" disabled={dialogBusy}>
+                保存
               </button>
             </div>
           </form>

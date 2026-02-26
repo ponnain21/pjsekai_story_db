@@ -173,10 +173,36 @@
   gap: 0.35rem;
 }
 
+.episode-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
 .episode-list-item {
   text-align: left;
   cursor: grab;
   padding: 0.4rem 0.55rem;
+  min-width: 0;
+}
+
+.episode-row-title {
+  display: block;
+  line-height: 1.2;
+}
+
+.episode-row-tags {
+  display: block;
+  margin-top: 0.2rem;
+  color: #5a6a77;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.episode-settings-button {
+  align-self: stretch;
+  padding-inline: 0.55rem;
 }
 
 .episode-actions {
@@ -891,6 +917,14 @@ button:disabled {
 
   .episode-create-row {
     grid-template-columns: 1fr;
+  }
+
+  .episode-row {
+    grid-template-columns: 1fr;
+  }
+
+  .episode-settings-button {
+    justify-self: end;
   }
 
   .mode-toggle-divider {
