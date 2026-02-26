@@ -19,6 +19,7 @@ type SubItemRow = {
   title: string
   has_episodes: boolean
   episode_number_start: number
+  episode_labels: string[]
   scheduled_on: string | null
   tags: string[] | null
   body: string
@@ -328,6 +329,7 @@ function App() {
   const [mainSelectedTags, setMainSelectedTags] = useState<string[]>([])
   const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [episodeTitle, setEpisodeTitle] = useState('')
+  const [episodeLabelsDraft, setEpisodeLabelsDraft] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
   const [filterTermDraft, setFilterTermDraft] = useState('')
   const [speakerNameDraft, setSpeakerNameDraft] = useState('')
@@ -378,6 +380,10 @@ function App() {
     setParserUndoStack([])
     setParserRedoStack([])
   }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedSubItem?.body, selectedEpisode?.id, selectedEpisode?.body])
+
+  useEffect(() => {
+    setEpisodeLabelsDraft((selectedSubItem?.episode_labels ?? []).join('\n'))
+  }, [selectedSubItem?.id, selectedSubItem?.episode_labels])
 
   useEffect(() => {
     if (pageMode === 'subitemBody' && !selectedSubItemId) {
@@ -494,12 +500,36 @@ function App() {
   const loadSubItems = async (itemId: string) => {
     const { data, error: loadError } = await supabase
       .from('threads')
-      .select('id, node_id, title, has_episodes, episode_number_start, scheduled_on, tags, body, sort_order, created_at')
+      .select('id, node_id, title, has_episodes, episode_number_start, episode_labels, scheduled_on, tags, body, sort_order, created_at')
       .eq('node_id', itemId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (loadError) {
+      if (loadError.message.includes('episode_labels')) {
+        const { data: partialData, error: partialError } = await supabase
+          .from('threads')
+          .select('id, node_id, title, has_episodes, episode_number_start, scheduled_on, tags, body, sort_order, created_at')
+          .eq('node_id', itemId)
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true })
+
+        if (partialError) {
+          setError(partialError.message)
+          return
+        }
+
+        const fallbackSubItems = (
+          (partialData ?? []) as Omit<SubItemRow, 'episode_labels'>[]
+        ).map((subItem) => ({ ...subItem, episode_labels: [] }))
+        setSubItems(fallbackSubItems)
+        setSelectedSubItemId((current) => {
+          if (current && fallbackSubItems.some((subItem) => subItem.id === current)) return current
+          return fallbackSubItems[0]?.id ?? null
+        })
+        return
+      }
+
       const { data: legacyData, error: legacyError } = await supabase
         .from('threads')
         .select('id, node_id, title, scheduled_on, tags, body, sort_order, created_at')
@@ -512,10 +542,11 @@ function App() {
         return
       }
 
-      const fallbackSubItems = ((legacyData ?? []) as Omit<SubItemRow, 'has_episodes' | 'episode_number_start'>[]).map((subItem) => ({
+      const fallbackSubItems = ((legacyData ?? []) as Omit<SubItemRow, 'has_episodes' | 'episode_number_start' | 'episode_labels'>[]).map((subItem) => ({
         ...subItem,
         has_episodes: false,
         episode_number_start: 1,
+        episode_labels: [],
       }))
       setSubItems(fallbackSubItems)
       setSelectedSubItemId((current) => {
@@ -1269,6 +1300,33 @@ function App() {
     if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
+  const saveEpisodeLabels = async () => {
+    if (!selectedSubItem) return
+    setError('')
+
+    const labels = episodeLabelsDraft
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((label) => label.trim())
+      .filter(Boolean)
+
+    const { error: updateError } = await supabase
+      .from('threads')
+      .update({ episode_labels: labels })
+      .eq('id', selectedSubItem.id)
+
+    if (updateError) {
+      if (updateError.message.includes('episode_labels')) {
+        setError('threads テーブルに episode_labels 列が必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(updateError.message)
+      }
+      return
+    }
+
+    if (selectedItemId) await loadSubItems(selectedItemId)
+  }
+
   const addEpisode = async () => {
     if (!selectedSubItem) {
       setError('先に項目内項目を選択してください。')
@@ -1364,6 +1422,7 @@ function App() {
       title: template.title,
       has_episodes: false,
       episode_number_start: 1,
+      episode_labels: [],
       scheduled_on: null,
       tags: [],
       body: '',
@@ -1372,8 +1431,12 @@ function App() {
 
     const { error: insertError } = await supabase.from('threads').insert(payload)
     if (insertError) {
-      if (insertError.message.includes('has_episodes') || insertError.message.includes('episode_number_start')) {
-        setError('threads テーブルに has_episodes / episode_number_start 列が必要です。supabase/schema.sql を実行してください。')
+      if (
+        insertError.message.includes('has_episodes') ||
+        insertError.message.includes('episode_number_start') ||
+        insertError.message.includes('episode_labels')
+      ) {
+        setError('threads テーブルに has_episodes / episode_number_start / episode_labels 列が必要です。supabase/schema.sql を実行してください。')
       } else {
         setError(insertError.message)
       }
@@ -2329,6 +2392,20 @@ function App() {
                             </button>
                           </div>
 
+                          <label className="stack-inline-file">
+                            話ラベル（任意・1行につき1つ。例: 前編 / 後編）
+                            <textarea
+                              value={episodeLabelsDraft}
+                              onChange={(event) => setEpisodeLabelsDraft(event.target.value)}
+                              placeholder={'前編\n後編'}
+                            />
+                          </label>
+                          <div className="body-editor-actions">
+                            <button type="button" className="ghost-button" onClick={() => void saveEpisodeLabels()}>
+                              話ラベルを保存
+                            </button>
+                          </div>
+
                           <div className="episode-create-row">
                             <input
                               value={episodeTitle}
@@ -2358,7 +2435,9 @@ function App() {
                                   onDrop={(event) => void dropSort('episode', episode.id, event)}
                                   onDragEnd={() => setDragState(null)}
                                 >
-                                  {selectedSubItem.episode_number_start + index}. {episode.title}
+                                  {((selectedSubItem.episode_labels[index] ?? '').trim() ||
+                                    `${selectedSubItem.episode_number_start + index}.`)}{' '}
+                                  {episode.title}
                                 </button>
                               ))
                             )}

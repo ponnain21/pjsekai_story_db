@@ -32,6 +32,7 @@ create table if not exists public.threads (
   title text not null,
   has_episodes boolean not null default false,
   episode_number_start integer not null default 1 check (episode_number_start in (0, 1)),
+  episode_labels text[] not null default '{}',
   scheduled_on date null,
   tags text[] not null default '{}',
   body text not null default '',
@@ -43,6 +44,8 @@ alter table if exists public.threads
   add column if not exists has_episodes boolean not null default false;
 alter table if exists public.threads
   add column if not exists episode_number_start integer not null default 1;
+alter table if exists public.threads
+  add column if not exists episode_labels text[] not null default '{}';
 alter table if exists public.threads
   add column if not exists scheduled_on date null;
 alter table if exists public.threads
