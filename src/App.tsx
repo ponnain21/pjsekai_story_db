@@ -48,6 +48,24 @@ type TagPresetRow = {
   created_at: string
 }
 
+type FilterTermRow = {
+  id: string
+  term: string
+  created_at: string
+}
+
+type SpeakerProfileRow = {
+  id: string
+  name: string
+  icon_url: string | null
+  created_at: string
+}
+
+type ParsedLineRow = {
+  speaker: string
+  content: string
+}
+
 type SortableKind = 'item' | 'subitem' | 'episode' | 'template' | 'tag'
 
 type PresetDialogState = {
@@ -64,6 +82,86 @@ type ConfirmDialogState = {
 }
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)))
+
+const isMissingRelationError = (message: string) =>
+  message.includes('relation') && message.includes('does not exist')
+
+const splitAndFilterLines = (rawText: string, blockedTerms: Set<string>) => {
+  return rawText
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !blockedTerms.has(line))
+}
+
+const isLikelySpeakerLine = (line: string, nextLine: string | undefined, knownSpeakers: Set<string>) => {
+  if (!line) return false
+  if (knownSpeakers.has(line)) return true
+  if (!nextLine) return false
+  if (line.length > 20) return false
+  if (/[。、，．!?！？]/.test(line)) return false
+  if (/\s/.test(line)) return false
+  if (/^[0-9０-９\-〜～]+$/.test(line)) return false
+  return true
+}
+
+const parseScriptLines = (rawText: string, blockedTerms: string[], speakerNames: string[]) => {
+  const blockedSet = new Set(blockedTerms.map((term) => term.trim()).filter(Boolean))
+  const knownSpeakers = new Set(speakerNames.map((name) => name.trim()).filter(Boolean))
+  const lines = splitAndFilterLines(rawText, blockedSet)
+
+  const pairRows: ParsedLineRow[] = []
+  for (let index = 0; index < lines.length; index += 2) {
+    const speaker = lines[index]?.trim() ?? ''
+    const content = lines[index + 1]?.trim() ?? ''
+    if (!speaker || !content) continue
+    pairRows.push({ speaker, content })
+  }
+
+  if (pairRows.length > 0) {
+    return pairRows
+  }
+
+  // Fallback parser when line pairing cannot be formed (e.g. skip count mismatch).
+  const rows: ParsedLineRow[] = []
+
+  let currentSpeaker = ''
+  let contentBuffer: string[] = []
+  const flush = () => {
+    const content = contentBuffer.join('\n').trim()
+    if (!content) {
+      contentBuffer = []
+      return
+    }
+    rows.push({
+      speaker: currentSpeaker || 'ナレーション',
+      content,
+    })
+    contentBuffer = []
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const nextLine = lines[index + 1]
+    if (isLikelySpeakerLine(line, nextLine, knownSpeakers)) {
+      flush()
+      currentSpeaker = line
+      continue
+    }
+    contentBuffer.push(line)
+  }
+  flush()
+
+  return rows
+}
+
+const FallbackSpeakerIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 20c0-3.9 3.6-7 8-7s8 3.1 8 7" />
+  </svg>
+)
 
 const reorderRowsByIds = <T extends { id: string; sort_order: number }>(
   rows: T[],
@@ -95,6 +193,8 @@ function App() {
   const [episodes, setEpisodes] = useState<EpisodeRow[]>([])
   const [subItemTemplates, setSubItemTemplates] = useState<SubItemTemplateRow[]>([])
   const [tagPresets, setTagPresets] = useState<TagPresetRow[]>([])
+  const [filterTerms, setFilterTerms] = useState<FilterTermRow[]>([])
+  const [speakerProfiles, setSpeakerProfiles] = useState<SpeakerProfileRow[]>([])
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
   const [selectedSettingsTemplateId, setSelectedSettingsTemplateId] = useState<string | null>(null)
@@ -109,6 +209,11 @@ function App() {
   const [mainSelectedTemplateIds, setMainSelectedTemplateIds] = useState<string[]>([])
   const [episodeTitle, setEpisodeTitle] = useState('')
   const [subItemBodyDraft, setSubItemBodyDraft] = useState('')
+  const [filterTermDraft, setFilterTermDraft] = useState('')
+  const [speakerNameDraft, setSpeakerNameDraft] = useState('')
+  const [speakerIconUrlDraft, setSpeakerIconUrlDraft] = useState('')
+  const [editingSpeakerProfileId, setEditingSpeakerProfileId] = useState<string | null>(null)
+  const [parsedLines, setParsedLines] = useState<ParsedLineRow[]>([])
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
@@ -127,9 +232,11 @@ function App() {
   useEffect(() => {
     if (selectedSubItem?.has_episodes) {
       setSubItemBodyDraft(selectedEpisode?.body ?? '')
+      setParsedLines([])
       return
     }
     setSubItemBodyDraft(selectedSubItem?.body ?? '')
+    setParsedLines([])
   }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedSubItem?.body, selectedEpisode?.id, selectedEpisode?.body])
 
   useEffect(() => {
@@ -380,6 +487,42 @@ function App() {
     applyLoadedTags((data ?? []) as TagPresetRow[])
   }
 
+  const loadFilterTerms = async () => {
+    const { data, error: loadError } = await supabase
+      .from('parser_filter_terms')
+      .select('id, term, created_at')
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setFilterTerms([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    setFilterTerms((data ?? []) as FilterTermRow[])
+  }
+
+  const loadSpeakerProfiles = async () => {
+    const { data, error: loadError } = await supabase
+      .from('speaker_profiles')
+      .select('id, name, icon_url, created_at')
+      .order('created_at', { ascending: true })
+
+    if (loadError) {
+      if (isMissingRelationError(loadError.message)) {
+        setSpeakerProfiles([])
+        return
+      }
+      setError(loadError.message)
+      return
+    }
+
+    setSpeakerProfiles((data ?? []) as SpeakerProfileRow[])
+  }
+
   useEffect(() => {
     if (!session || accessStatus !== 'allowed') {
       setItems([])
@@ -387,16 +530,22 @@ function App() {
       setEpisodes([])
       setSubItemTemplates([])
       setTagPresets([])
+      setFilterTerms([])
+      setSpeakerProfiles([])
       setSelectedItemId(null)
       setSelectedSettingsTemplateId(null)
       setSelectedSettingsTagId(null)
       setSelectedSubItemId(null)
       setSelectedEpisodeId(null)
+      setEditingSpeakerProfileId(null)
+      setParsedLines([])
       return
     }
     void loadItems()
     void loadSubItemTemplates()
     void loadTagPresets()
+    void loadFilterTerms()
+    void loadSpeakerProfiles()
   }, [session, accessStatus])
 
   useEffect(() => {
@@ -1070,6 +1219,113 @@ function App() {
     if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
+  const submitFilterTerm = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    const trimmed = filterTermDraft.trim()
+    if (!trimmed) {
+      setError('除去語句を入力してください。')
+      return
+    }
+
+    const { error: upsertError } = await supabase
+      .from('parser_filter_terms')
+      .upsert({ term: trimmed }, { onConflict: 'term' })
+
+    if (upsertError) {
+      if (isMissingRelationError(upsertError.message)) {
+        setError('parser_filter_terms テーブルが必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(upsertError.message)
+      }
+      return
+    }
+
+    setFilterTermDraft('')
+    await loadFilterTerms()
+  }
+
+  const deleteFilterTerm = async (termRow: FilterTermRow) => {
+    const { error: deleteError } = await supabase.from('parser_filter_terms').delete().eq('id', termRow.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+    await loadFilterTerms()
+  }
+
+  const clearSpeakerProfileDraft = () => {
+    setSpeakerNameDraft('')
+    setSpeakerIconUrlDraft('')
+    setEditingSpeakerProfileId(null)
+  }
+
+  const startEditSpeakerProfile = (profile: SpeakerProfileRow) => {
+    setEditingSpeakerProfileId(profile.id)
+    setSpeakerNameDraft(profile.name)
+    setSpeakerIconUrlDraft(profile.icon_url ?? '')
+  }
+
+  const submitSpeakerProfile = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    const name = speakerNameDraft.trim()
+    if (!name) {
+      setError('話者名を入力してください。')
+      return
+    }
+
+    const payload = {
+      name,
+      icon_url: speakerIconUrlDraft.trim() || null,
+    }
+
+    const { error: upsertError } = editingSpeakerProfileId
+      ? await supabase.from('speaker_profiles').update(payload).eq('id', editingSpeakerProfileId)
+      : await supabase.from('speaker_profiles').upsert(payload, { onConflict: 'name' })
+
+    if (upsertError) {
+      if (isMissingRelationError(upsertError.message)) {
+        setError('speaker_profiles テーブルが必要です。supabase/schema.sql を実行してください。')
+      } else {
+        setError(upsertError.message)
+      }
+      return
+    }
+
+    clearSpeakerProfileDraft()
+    await loadSpeakerProfiles()
+  }
+
+  const deleteSpeakerProfile = async (profile: SpeakerProfileRow) => {
+    const { error: deleteError } = await supabase.from('speaker_profiles').delete().eq('id', profile.id)
+    if (deleteError) {
+      setError(deleteError.message)
+      return
+    }
+    if (editingSpeakerProfileId === profile.id) clearSpeakerProfileDraft()
+    await loadSpeakerProfiles()
+  }
+
+  const runSpeakerSplit = () => {
+    const parsed = parseScriptLines(
+      subItemBodyDraft,
+      filterTerms.map((term) => term.term),
+      speakerProfiles.map((profile) => profile.name),
+    )
+
+    if (parsed.length === 0) {
+      setParsedLines([])
+      setError('解析できる本文がありませんでした。除去語句か本文を確認してください。')
+      return
+    }
+
+    setError('')
+    setParsedLines(parsed)
+    const formatted = parsed.map((row) => `${row.speaker}\n${row.content}`).join('\n\n')
+    setSubItemBodyDraft(formatted)
+  }
+
   if (!session) {
     return (
       <main className="auth-shell">
@@ -1231,6 +1487,108 @@ function App() {
               </div>
             </section>
 
+            <section className="settings-section">
+              <h3>除去語句設定</h3>
+              <p className="subtle">本文解析時に、行がこの語句と完全一致した場合は除去します。</p>
+              <form className="settings-inline-form" onSubmit={submitFilterTerm}>
+                <input
+                  value={filterTermDraft}
+                  onChange={(event) => setFilterTermDraft(event.target.value)}
+                  placeholder="例: 効果音"
+                />
+                <button type="submit">追加</button>
+              </form>
+              <div className="settings-token-list">
+                {filterTerms.length === 0 ? (
+                  <p className="subtle">除去語句はまだありません</p>
+                ) : (
+                  filterTerms.map((termRow) => (
+                    <button
+                      key={termRow.id}
+                      type="button"
+                      className="settings-token-chip"
+                      onClick={() =>
+                        openConfirmDialog({
+                          title: '除去語句の削除',
+                          message: `「${termRow.term}」を削除します。`,
+                          confirmLabel: '削除する',
+                          onConfirm: async () => {
+                            await deleteFilterTerm(termRow)
+                          },
+                        })
+                      }
+                    >
+                      {termRow.term} ×
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h3>話者アイコン設定</h3>
+              <p className="subtle">話者名で一致した場合にアイコン表示します。未設定は灰色アイコンになります。</p>
+              <form className="stack-form" onSubmit={submitSpeakerProfile}>
+                <div className="settings-inline-form">
+                  <input
+                    value={speakerNameDraft}
+                    onChange={(event) => setSpeakerNameDraft(event.target.value)}
+                    placeholder="話者名"
+                  />
+                  <button type="submit">{editingSpeakerProfileId ? '更新' : '追加'}</button>
+                </div>
+                <input
+                  value={speakerIconUrlDraft}
+                  onChange={(event) => setSpeakerIconUrlDraft(event.target.value)}
+                  placeholder="アイコンURL（任意）"
+                />
+                {editingSpeakerProfileId && (
+                  <button type="button" className="ghost-button" onClick={clearSpeakerProfileDraft}>
+                    編集をキャンセル
+                  </button>
+                )}
+              </form>
+              <div className="speaker-profile-list">
+                {speakerProfiles.length === 0 ? (
+                  <p className="subtle">話者プロフィールはまだありません</p>
+                ) : (
+                  speakerProfiles.map((profile) => (
+                    <article key={profile.id} className="speaker-profile-row">
+                      <button type="button" className="speaker-profile-main" onClick={() => startEditSpeakerProfile(profile)}>
+                        <span className="speaker-avatar">
+                          {profile.icon_url ? (
+                            <img src={profile.icon_url} alt={`${profile.name} icon`} loading="lazy" />
+                          ) : (
+                            <FallbackSpeakerIcon />
+                          )}
+                        </span>
+                        <span className="speaker-profile-text">
+                          <span className="speaker-name">{profile.name}</span>
+                          <span className="subtle">{profile.icon_url ? profile.icon_url : 'アイコン未設定'}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button mini-action"
+                        onClick={() =>
+                          openConfirmDialog({
+                            title: '話者プロフィールの削除',
+                            message: `「${profile.name}」を削除します。`,
+                            confirmLabel: '削除する',
+                            onConfirm: async () => {
+                              await deleteSpeakerProfile(profile)
+                            },
+                          })
+                        }
+                      >
+                        削除
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
+
             <div className="settings-footer">
               <button type="button" className="danger-button settings-logout" onClick={logout}>
                 ログアウト
@@ -1343,13 +1701,46 @@ function App() {
                         placeholder={selectedSubItem.has_episodes ? '選択した話の本文を入力' : 'ここに本文を入力'}
                         disabled={selectedSubItem.has_episodes && !selectedEpisode}
                       />
-                      <button
-                        type="button"
-                        onClick={saveSelectedSubItemBody}
-                        disabled={selectedSubItem.has_episodes && !selectedEpisode}
-                      >
-                        本文を保存
-                      </button>
+                      <div className="body-editor-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={runSpeakerSplit}
+                          disabled={selectedSubItem.has_episodes && !selectedEpisode}
+                        >
+                          話者で振り分け
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveSelectedSubItemBody}
+                          disabled={selectedSubItem.has_episodes && !selectedEpisode}
+                        >
+                          本文を保存
+                        </button>
+                      </div>
+
+                      {parsedLines.length > 0 && (
+                        <div className="parsed-line-list">
+                          {parsedLines.map((row, index) => {
+                            const profile = speakerProfiles.find((speaker) => speaker.name === row.speaker) ?? null
+                            return (
+                              <article key={`${row.speaker}-${index}`} className="parsed-line-row">
+                                <span className="speaker-avatar">
+                                  {profile?.icon_url ? (
+                                    <img src={profile.icon_url} alt={`${row.speaker} icon`} loading="lazy" />
+                                  ) : (
+                                    <FallbackSpeakerIcon />
+                                  )}
+                                </span>
+                                <div className="parsed-line-content">
+                                  <p className="speaker-name">{row.speaker}</p>
+                                  <p className="parsed-line-text">{row.content}</p>
+                                </div>
+                              </article>
+                            )
+                          })}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <p className="subtle">項目ページで項目内項目を選択してから本文ページを開いてください。</p>
