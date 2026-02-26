@@ -101,8 +101,12 @@ create table if not exists public.speaker_profiles (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   icon_url text null,
+  speech_balloon_id text null,
   created_at timestamptz not null default now()
 );
+
+alter table if exists public.speaker_profiles
+  add column if not exists speech_balloon_id text null;
 
 create table if not exists public.entries (
   id uuid primary key default gen_random_uuid(),

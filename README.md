@@ -35,7 +35,7 @@ on conflict (email) do nothing;
 ```
 
 ※ 未登録メールはログイン後すぐに弾かれ、データアクセスも RLS で拒否されます。
-※ 既存プロジェクトを更新する場合も `supabase/schema.sql` を再実行してください（`threads` の追加カラムと `subitem_templates` / `subitem_tag_presets` テーブルを作成します）。
+※ 既存プロジェクトを更新する場合も `supabase/schema.sql` を再実行してください（`threads` の追加カラム、`subitem_templates` / `subitem_tag_presets` テーブル、`speaker_profiles.speech_balloon_id` 列を作成します）。
 
 ## 3. アプリ起動
 

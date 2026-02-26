@@ -471,6 +471,12 @@
   align-items: center;
 }
 
+.settings-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .settings-token-list {
   display: flex;
   flex-wrap: wrap;
@@ -623,6 +629,12 @@
 .body-editor {
   min-height: 10rem;
   resize: vertical;
+}
+
+.export-output {
+  width: 100%;
+  min-height: 8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .tag-picker {

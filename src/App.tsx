@@ -65,8 +65,30 @@ type SpeakerProfileRow = {
   id: string
   name: string
   icon_url: string | null
+  speech_balloon_id: string | null
   created_at: string
 }
+
+type ParserHistoryAction =
+  | {
+      kind: 'set_filter_term'
+      term: string
+      beforeEnabled: boolean
+      afterEnabled: boolean
+      reparse: boolean
+    }
+  | {
+      kind: 'set_line_rule'
+      lineText: string
+      beforeClassification: 'speaker' | 'direction' | null
+      afterClassification: 'speaker' | 'direction' | null
+      reparse: boolean
+    }
+  | {
+      kind: 'replace_body_draft'
+      beforeBody: string
+      afterBody: string
+    }
 
 type ParsedLineRow = {
   kind: 'dialogue' | 'direction'
@@ -153,6 +175,13 @@ const splitSpeakerAndDialogueFromSingleLine = (line: string) => {
 
 const formatParsedRowsToBody = (rows: ParsedLineRow[]) =>
   rows.map((row) => (row.kind === 'direction' ? row.content : `${row.speaker}\n${row.content}`)).join('\n\n')
+
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tagName = target.tagName
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
+}
 
 const parseScriptLines = (
   rawText: string,
@@ -292,9 +321,13 @@ function App() {
   const [filterTermDraft, setFilterTermDraft] = useState('')
   const [speakerNameDraft, setSpeakerNameDraft] = useState('')
   const [speakerIconUrlDraft, setSpeakerIconUrlDraft] = useState('')
+  const [speakerBalloonIdDraft, setSpeakerBalloonIdDraft] = useState('')
   const [speakerIconFile, setSpeakerIconFile] = useState<File | null>(null)
   const [editingSpeakerProfileId, setEditingSpeakerProfileId] = useState<string | null>(null)
   const [parsedLines, setParsedLines] = useState<ParsedLineRow[]>([])
+  const [balloonExportText, setBalloonExportText] = useState('')
+  const [parserUndoStack, setParserUndoStack] = useState<ParserHistoryAction[]>([])
+  const [parserRedoStack, setParserRedoStack] = useState<ParserHistoryAction[]>([])
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [presetNameDraft, setPresetNameDraft] = useState('')
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
@@ -323,10 +356,16 @@ function App() {
     if (selectedSubItem?.has_episodes) {
       setSubItemBodyDraft(selectedEpisode?.body ?? '')
       setParsedLines([])
+      setBalloonExportText('')
+      setParserUndoStack([])
+      setParserRedoStack([])
       return
     }
     setSubItemBodyDraft(selectedSubItem?.body ?? '')
     setParsedLines([])
+    setBalloonExportText('')
+    setParserUndoStack([])
+    setParserRedoStack([])
   }, [selectedSubItem?.id, selectedSubItem?.has_episodes, selectedSubItem?.body, selectedEpisode?.id, selectedEpisode?.body])
 
   useEffect(() => {
@@ -616,10 +655,27 @@ function App() {
   const loadSpeakerProfiles = async () => {
     const { data, error: loadError } = await supabase
       .from('speaker_profiles')
-      .select('id, name, icon_url, created_at')
+      .select('id, name, icon_url, speech_balloon_id, created_at')
       .order('created_at', { ascending: true })
 
     if (loadError) {
+      if (loadError.message.includes('speech_balloon_id')) {
+        const { data: legacyData, error: legacyError } = await supabase
+          .from('speaker_profiles')
+          .select('id, name, icon_url, created_at')
+          .order('created_at', { ascending: true })
+
+        if (legacyError) {
+          setError(legacyError.message)
+          return
+        }
+
+        const fallbackProfiles = (
+          (legacyData ?? []) as Omit<SpeakerProfileRow, 'speech_balloon_id'>[]
+        ).map((profile) => ({ ...profile, speech_balloon_id: null }))
+        setSpeakerProfiles(fallbackProfiles)
+        return
+      }
       if (isMissingRelationError(loadError.message)) {
         setSpeakerProfiles([])
         return
@@ -648,6 +704,9 @@ function App() {
       setSelectedEpisodeId(null)
       setEditingSpeakerProfileId(null)
       setParsedLines([])
+      setBalloonExportText('')
+      setParserUndoStack([])
+      setParserRedoStack([])
       return
     }
     void loadItems()
@@ -1369,46 +1428,213 @@ function App() {
     if (selectedItemId) await loadSubItems(selectedItemId)
   }
 
-  const upsertFilterTerm = async (termValue: string, reparse = false) => {
+  const isParserHistoryActionNoop = (action: ParserHistoryAction) => {
+    if (action.kind === 'set_filter_term') return action.beforeEnabled === action.afterEnabled
+    if (action.kind === 'set_line_rule') return action.beforeClassification === action.afterClassification
+    return action.beforeBody === action.afterBody
+  }
+
+  const applyParserHistoryAction = async (
+    action: ParserHistoryAction,
+    direction: 'forward' | 'backward',
+  ) => {
+    if (action.kind === 'replace_body_draft') {
+      const nextBody = direction === 'forward' ? action.afterBody : action.beforeBody
+      setError('')
+      setBalloonExportText('')
+      setSubItemBodyDraft(nextBody)
+      setParsedLines(
+        parseScriptLines(
+          nextBody,
+          filterTerms.map((term) => term.term),
+          lineRuleMap,
+          speakerProfiles.map((profile) => profile.name),
+        ),
+      )
+      return true
+    }
+
+    if (action.kind === 'set_filter_term') {
+      const trimmed = action.term.trim()
+      if (!trimmed) {
+        setError('除去語句を入力してください。')
+        return false
+      }
+
+      const enableTerm = direction === 'forward' ? action.afterEnabled : action.beforeEnabled
+      let nextRows = filterTerms
+      if (enableTerm) {
+        const { data, error: upsertError } = await supabase
+          .from('parser_filter_terms')
+          .upsert({ term: trimmed }, { onConflict: 'term' })
+          .select('id, term, created_at')
+          .maybeSingle()
+
+        if (upsertError) {
+          if (isMissingRelationError(upsertError.message)) {
+            setError('parser_filter_terms テーブルが必要です。supabase/schema.sql を実行してください。')
+          } else {
+            setError(upsertError.message)
+          }
+          return false
+        }
+
+        const resolvedRow: FilterTermRow =
+          (data as FilterTermRow | null) ?? {
+            id: crypto.randomUUID(),
+            term: trimmed,
+            created_at: new Date().toISOString(),
+          }
+        nextRows = [...filterTerms.filter((row) => row.term !== trimmed), resolvedRow].sort((a, b) =>
+          a.created_at.localeCompare(b.created_at),
+        )
+      } else {
+        const existing = filterTerms.find((row) => row.term === trimmed) ?? null
+        if (existing) {
+          const { error: deleteError } = await supabase.from('parser_filter_terms').delete().eq('id', existing.id)
+          if (deleteError) {
+            setError(deleteError.message)
+            return false
+          }
+        }
+        nextRows = filterTerms.filter((row) => row.term !== trimmed)
+      }
+
+      setError('')
+      setFilterTerms(nextRows)
+      setBalloonExportText('')
+      if (action.reparse) {
+        applyParserResult(
+          lineRuleMap,
+          nextRows.map((row) => row.term),
+        )
+      }
+      return true
+    }
+
+    const trimmed = action.lineText.trim()
+    if (!trimmed) return true
+
+    const nextClassification = direction === 'forward' ? action.afterClassification : action.beforeClassification
+    const nextRules = new Map(lineRuleMap)
+    if (nextClassification) {
+      const { data, error: upsertError } = await supabase
+        .from('parser_line_classifications')
+        .upsert({ line_text: trimmed, classification: nextClassification }, { onConflict: 'line_text' })
+        .select('id, line_text, classification, created_at')
+        .maybeSingle()
+
+      if (upsertError) {
+        if (isMissingRelationError(upsertError.message)) {
+          setError('parser_line_classifications テーブルが必要です。supabase/schema.sql を実行してください。')
+        } else {
+          setError(upsertError.message)
+        }
+        return false
+      }
+
+      nextRules.set(trimmed, nextClassification)
+      setLineRules((current) => {
+        if (!data) {
+          const fallbackRule: ParserLineRuleRow = {
+            id: crypto.randomUUID(),
+            line_text: trimmed,
+            classification: nextClassification,
+            created_at: new Date().toISOString(),
+          }
+          const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
+          return [...withoutOld, fallbackRule]
+        }
+        const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
+        return [...withoutOld, data as ParserLineRuleRow]
+      })
+    } else {
+      const existing = lineRules.find((rule) => rule.line_text === trimmed) ?? null
+      if (existing) {
+        const { error: deleteError } = await supabase
+          .from('parser_line_classifications')
+          .delete()
+          .eq('id', existing.id)
+
+        if (deleteError) {
+          setError(deleteError.message)
+          return false
+        }
+      }
+      nextRules.delete(trimmed)
+      setLineRules((current) => current.filter((item) => item.line_text !== trimmed))
+    }
+
     setError('')
+    setBalloonExportText('')
+    if (action.reparse) {
+      applyParserResult(nextRules)
+    }
+    return true
+  }
+
+  const commitParserHistoryAction = async (action: ParserHistoryAction) => {
+    if (isParserHistoryActionNoop(action)) return true
+    const ok = await applyParserHistoryAction(action, 'forward')
+    if (!ok) return false
+    setParserUndoStack((current) => [...current, action])
+    setParserRedoStack([])
+    return true
+  }
+
+  const undoParserAction = async () => {
+    const target = parserUndoStack[parserUndoStack.length - 1]
+    if (!target) return
+    const ok = await applyParserHistoryAction(target, 'backward')
+    if (!ok) return
+    setParserUndoStack((current) => current.slice(0, -1))
+    setParserRedoStack((current) => [...current, target])
+  }
+
+  const redoParserAction = async () => {
+    const target = parserRedoStack[parserRedoStack.length - 1]
+    if (!target) return
+    const ok = await applyParserHistoryAction(target, 'forward')
+    if (!ok) return
+    setParserRedoStack((current) => current.slice(0, -1))
+    setParserUndoStack((current) => [...current, target])
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      if (isEditableTarget(event.target)) return
+
+      const key = event.key.toLowerCase()
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        void undoParserAction()
+        return
+      }
+
+      if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        event.preventDefault()
+        void redoParserAction()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [parserUndoStack, parserRedoStack, filterTerms, lineRuleMap, lineRules, speakerProfiles, subItemBodyDraft])
+
+  const upsertFilterTerm = async (termValue: string, reparse = false) => {
     const trimmed = termValue.trim()
     if (!trimmed) {
       setError('除去語句を入力してください。')
       return false
     }
-
-    const { data, error: upsertError } = await supabase
-      .from('parser_filter_terms')
-      .upsert({ term: trimmed }, { onConflict: 'term' })
-      .select('id, term, created_at')
-      .maybeSingle()
-
-    if (upsertError) {
-      if (isMissingRelationError(upsertError.message)) {
-        setError('parser_filter_terms テーブルが必要です。supabase/schema.sql を実行してください。')
-      } else {
-        setError(upsertError.message)
-      }
-      return false
-    }
-
-    const resolvedRow: FilterTermRow =
-      (data as FilterTermRow | null) ?? {
-        id: crypto.randomUUID(),
-        term: trimmed,
-        created_at: new Date().toISOString(),
-      }
-    const nextRows = [...filterTerms.filter((row) => row.term !== trimmed), resolvedRow].sort((a, b) =>
-      a.created_at.localeCompare(b.created_at),
-    )
-    setFilterTerms(nextRows)
-    if (reparse) {
-      applyParserResult(
-        lineRuleMap,
-        nextRows.map((row) => row.term),
-      )
-    }
-    return true
+    return commitParserHistoryAction({
+      kind: 'set_filter_term',
+      term: trimmed,
+      beforeEnabled: filterTerms.some((row) => row.term === trimmed),
+      afterEnabled: true,
+      reparse,
+    })
   }
 
   const submitFilterTerm = async (event: FormEvent) => {
@@ -1418,18 +1644,19 @@ function App() {
     setFilterTermDraft('')
   }
 
-  const deleteFilterTerm = async (termRow: FilterTermRow) => {
-    const { error: deleteError } = await supabase.from('parser_filter_terms').delete().eq('id', termRow.id)
-    if (deleteError) {
-      setError(deleteError.message)
-      return
-    }
-    await loadFilterTerms()
-  }
+  const deleteFilterTerm = async (termRow: FilterTermRow) =>
+    commitParserHistoryAction({
+      kind: 'set_filter_term',
+      term: termRow.term,
+      beforeEnabled: filterTerms.some((row) => row.term === termRow.term),
+      afterEnabled: false,
+      reparse: false,
+    })
 
   const clearSpeakerProfileDraft = () => {
     setSpeakerNameDraft('')
     setSpeakerIconUrlDraft('')
+    setSpeakerBalloonIdDraft('')
     setSpeakerIconFile(null)
     setEditingSpeakerProfileId(null)
   }
@@ -1438,6 +1665,7 @@ function App() {
     setEditingSpeakerProfileId(profile.id)
     setSpeakerNameDraft(profile.name)
     setSpeakerIconUrlDraft(profile.icon_url ?? '')
+    setSpeakerBalloonIdDraft(profile.speech_balloon_id ?? '')
     setSpeakerIconFile(null)
   }
 
@@ -1484,6 +1712,7 @@ function App() {
     const payload = {
       name,
       icon_url: iconUrl,
+      speech_balloon_id: speakerBalloonIdDraft.trim() || null,
     }
 
     const { error: upsertError } = editingSpeakerProfileId
@@ -1491,7 +1720,9 @@ function App() {
       : await supabase.from('speaker_profiles').upsert(payload, { onConflict: 'name' })
 
     if (upsertError) {
-      if (isMissingRelationError(upsertError.message)) {
+      if (upsertError.message.includes('speech_balloon_id')) {
+        setError('speaker_profiles テーブルに speech_balloon_id 列が必要です。supabase/schema.sql を実行してください。')
+      } else if (isMissingRelationError(upsertError.message)) {
         setError('speaker_profiles テーブルが必要です。supabase/schema.sql を実行してください。')
       } else {
         setError(upsertError.message)
@@ -1535,11 +1766,28 @@ function App() {
     setSubItemBodyDraft(formatParsedRowsToBody(parsed))
   }
 
-  const runSpeakerSplit = () => {
-    applyParserResult(lineRuleMap)
+  const runSpeakerSplit = async () => {
+    const parsed = parseScriptLines(
+      subItemBodyDraft,
+      filterTerms.map((term) => term.term),
+      lineRuleMap,
+      speakerProfiles.map((profile) => profile.name),
+    )
+
+    if (parsed.length === 0) {
+      setParsedLines([])
+      setError('解析できる本文がありませんでした。除去語句か本文を確認してください。')
+      return
+    }
+
+    await commitParserHistoryAction({
+      kind: 'replace_body_draft',
+      beforeBody: subItemBodyDraft,
+      afterBody: formatParsedRowsToBody(parsed),
+    })
   }
 
-  const splitDialogueRowSpeakerLine = (rowIndex: number) => {
+  const splitDialogueRowSpeakerLine = async (rowIndex: number) => {
     const row = parsedLines[rowIndex]
     if (!row || row.kind !== 'dialogue') return
 
@@ -1561,72 +1809,87 @@ function App() {
       })
       .join('\n\n')
 
-    setError('')
-    setSubItemBodyDraft(nextBody)
-    setParsedLines(
-      parseScriptLines(
-        nextBody,
-        filterTerms.map((term) => term.term),
-        lineRuleMap,
-        speakerProfiles.map((profile) => profile.name),
-      ),
+    await commitParserHistoryAction({
+      kind: 'replace_body_draft',
+      beforeBody: subItemBodyDraft,
+      afterBody: nextBody,
+    })
+  }
+
+  const generateSpeechBalloonExport = () => {
+    const parsed =
+      parsedLines.length > 0
+        ? parsedLines
+        : parseScriptLines(
+            subItemBodyDraft,
+            filterTerms.map((term) => term.term),
+            lineRuleMap,
+            speakerProfiles.map((profile) => profile.name),
+          )
+    const dialogueRows = parsed.filter((row): row is ParsedLineRow & { kind: 'dialogue' } => row.kind === 'dialogue')
+    if (dialogueRows.length === 0) {
+      setError('出力できるセリフがありません。')
+      return
+    }
+
+    const balloonIdMap = new Map(
+      speakerProfiles.map((profile) => [profile.name, (profile.speech_balloon_id ?? '').trim()] as const),
     )
+    const fallbackOtherId = (balloonIdMap.get('その他') ?? '').trim()
+
+    const missingSpeakers = new Set<string>()
+    const output = dialogueRows
+      .map((row) => {
+        const speakerId = (balloonIdMap.get(row.speaker) ?? '').trim()
+        const resolvedId = speakerId || fallbackOtherId
+        if (!resolvedId) {
+          missingSpeakers.add(row.speaker)
+          return ''
+        }
+        return `[speech_balloon id="${resolvedId}"]${row.content}[/speech_balloon]`
+      })
+      .filter(Boolean)
+      .join('')
+
+    if (missingSpeakers.size > 0) {
+      const names = Array.from(missingSpeakers).join(' / ')
+      setError(`吹き出しID未設定の話者があります: ${names}（話者「その他」にIDを設定するとフォールバックできます）`)
+      return
+    }
+
+    setError('')
+    setBalloonExportText(output)
+  }
+
+  const copySpeechBalloonExport = async () => {
+    if (!balloonExportText) return
+    try {
+      await navigator.clipboard.writeText(balloonExportText)
+    } catch {
+      setError('コピーに失敗しました。手動でコピーしてください。')
+    }
   }
 
   const upsertLineRule = async (lineText: string, classification: 'speaker' | 'direction') => {
-    setError('')
     const trimmed = lineText.trim()
     if (!trimmed) return
-
-    const { data, error: upsertError } = await supabase
-      .from('parser_line_classifications')
-      .upsert({ line_text: trimmed, classification }, { onConflict: 'line_text' })
-      .select('id, line_text, classification, created_at')
-      .maybeSingle()
-
-    if (upsertError) {
-      if (isMissingRelationError(upsertError.message)) {
-        setError('parser_line_classifications テーブルが必要です。supabase/schema.sql を実行してください。')
-      } else {
-        setError(upsertError.message)
-      }
-      return
-    }
-
-    const nextRules = new Map(lineRuleMap)
-    nextRules.set(trimmed, classification)
-    setLineRules((current) => {
-      if (!data) {
-        const fallbackRule: ParserLineRuleRow = {
-          id: crypto.randomUUID(),
-          line_text: trimmed,
-          classification,
-          created_at: new Date().toISOString(),
-        }
-        const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
-        return [...withoutOld, fallbackRule]
-      }
-      const withoutOld = current.filter((rule) => rule.line_text !== trimmed)
-      return [...withoutOld, data as ParserLineRuleRow]
+    await commitParserHistoryAction({
+      kind: 'set_line_rule',
+      lineText: trimmed,
+      beforeClassification: lineRuleMap.get(trimmed) ?? null,
+      afterClassification: classification,
+      reparse: true,
     })
-    applyParserResult(nextRules)
   }
 
   const removeLineRule = async (rule: ParserLineRuleRow) => {
-    const { error: deleteError } = await supabase
-      .from('parser_line_classifications')
-      .delete()
-      .eq('id', rule.id)
-
-    if (deleteError) {
-      setError(deleteError.message)
-      return
-    }
-
-    const nextRules = new Map(lineRuleMap)
-    nextRules.delete(rule.line_text)
-    setLineRules((current) => current.filter((item) => item.id !== rule.id))
-    applyParserResult(nextRules)
+    await commitParserHistoryAction({
+      kind: 'set_line_rule',
+      lineText: rule.line_text,
+      beforeClassification: lineRuleMap.get(rule.line_text) ?? rule.classification,
+      afterClassification: null,
+      reparse: true,
+    })
   }
 
   if (!session) {
@@ -1799,6 +2062,25 @@ function App() {
                 />
                 <button type="submit">追加</button>
               </form>
+              <div className="settings-history-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void undoParserAction()}
+                  disabled={parserUndoStack.length === 0}
+                >
+                  戻す（Ctrl+Z）
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void redoParserAction()}
+                  disabled={parserRedoStack.length === 0}
+                >
+                  進む（Ctrl+Y）
+                </button>
+              </div>
+              <p className="subtle">除去語句・判定学習・話者行分離に対してUndo/Redoできます。</p>
               <div className="settings-token-list">
                 {filterTerms.length === 0 ? (
                   <p className="subtle">除去語句はまだありません</p>
@@ -1868,8 +2150,11 @@ function App() {
             </section>
 
             <section className="settings-section">
-              <h3>話者アイコン設定</h3>
-              <p className="subtle">話者名で一致した場合にアイコン表示します。未設定は灰色アイコンになります。</p>
+              <h3>話者設定（アイコン / 吹き出しID）</h3>
+              <p className="subtle">
+                話者名で一致した場合にアイコン表示します。吹き出しIDは `[speech_balloon id="..."]` の出力に使います。
+              </p>
+              <p className="subtle">ID未設定の話者は、話者名「その他」のIDを使って出力します。</p>
               <form className="stack-form" onSubmit={submitSpeakerProfile}>
                 <div className="settings-inline-form">
                   <input
@@ -1883,6 +2168,11 @@ function App() {
                   value={speakerIconUrlDraft}
                   onChange={(event) => setSpeakerIconUrlDraft(event.target.value)}
                   placeholder="アイコンURL（任意）"
+                />
+                <input
+                  value={speakerBalloonIdDraft}
+                  onChange={(event) => setSpeakerBalloonIdDraft(event.target.value)}
+                  placeholder="吹き出しID（任意） 例: 28"
                 />
                 <label className="stack-inline-file">
                   画像ファイルをアップロード（任意）
@@ -1915,6 +2205,9 @@ function App() {
                         </span>
                         <span className="speaker-profile-text">
                           <span className="speaker-name">{profile.name}</span>
+                          <span className="subtle">
+                            吹き出しID: {profile.speech_balloon_id ? profile.speech_balloon_id : '未設定'}
+                          </span>
                           <span className="subtle">{profile.icon_url ? profile.icon_url : 'アイコン未設定'}</span>
                         </span>
                       </button>
@@ -2048,7 +2341,10 @@ function App() {
                       <textarea
                         className="body-editor"
                         value={subItemBodyDraft}
-                        onChange={(event) => setSubItemBodyDraft(event.target.value)}
+                        onChange={(event) => {
+                          setSubItemBodyDraft(event.target.value)
+                          setBalloonExportText('')
+                        }}
                         placeholder={selectedSubItem.has_episodes ? '選択した話の本文を入力' : 'ここに本文を入力'}
                         disabled={selectedSubItem.has_episodes && !selectedEpisode}
                       />
@@ -2056,10 +2352,26 @@ function App() {
                         <button
                           type="button"
                           className="ghost-button"
-                          onClick={runSpeakerSplit}
+                          onClick={() => void runSpeakerSplit()}
                           disabled={selectedSubItem.has_episodes && !selectedEpisode}
                         >
                           話者で振り分け
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={generateSpeechBalloonExport}
+                          disabled={selectedSubItem.has_episodes && !selectedEpisode}
+                        >
+                          吹き出しコード生成
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => void copySpeechBalloonExport()}
+                          disabled={!balloonExportText}
+                        >
+                          出力をコピー
                         </button>
                         <button
                           type="button"
@@ -2069,6 +2381,14 @@ function App() {
                           本文を保存
                         </button>
                       </div>
+                      {balloonExportText && (
+                        <textarea
+                          className="export-output"
+                          value={balloonExportText}
+                          readOnly
+                          aria-label="吹き出しコード出力"
+                        />
+                      )}
 
                       {parsedLines.length > 0 && (
                         <div className="parsed-line-list">
@@ -2182,7 +2502,7 @@ function App() {
                                     <button
                                       type="button"
                                       className="ghost-button parsed-row-action"
-                                      onClick={() => splitDialogueRowSpeakerLine(index)}
+                                      onClick={() => void splitDialogueRowSpeakerLine(index)}
                                     >
                                       話者行を分離
                                     </button>
