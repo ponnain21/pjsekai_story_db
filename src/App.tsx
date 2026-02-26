@@ -3205,7 +3205,17 @@ function App() {
                         disabled={selectedSubItem.has_episodes && !selectedEpisode}
                       />
                       <section className="body-tag-section">
-                        <p className="subtle">本文で範囲選択してタグを付与できます（付与済みは下のプレビューでホバー確認・削除）</p>
+                        <div className="body-tag-head">
+                          <p className="subtle">本文で範囲選択してタグを付与できます（付与済みは下のプレビューでホバー確認・削除）</p>
+                          <button
+                            type="button"
+                            className="ghost-button mini-action"
+                            onClick={() => openCreatePresetDialog('bodyTag')}
+                            disabled={dialogBusy}
+                          >
+                            ＋ 本文タグ作成
+                          </button>
+                        </div>
                         {bodyTagSelection ? (
                           <p className="body-tag-selection-text">
                             選択中: {bodyTagSelection.selectedText.length > 80 ? `${bodyTagSelection.selectedText.slice(0, 80)}...` : bodyTagSelection.selectedText}
@@ -3215,7 +3225,7 @@ function App() {
                         )}
                         <div className="template-button-list">
                           {bodyTagPresets.length === 0 ? (
-                            <p className="subtle">本文タグプリセットがありません（設定ページで作成してください）</p>
+                            <p className="subtle">本文タグプリセットがありません（上のボタンで作成できます）</p>
                           ) : (
                             bodyTagPresets.map((tag) => (
                               <button
